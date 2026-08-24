@@ -1,0 +1,59 @@
+# ============================================================
+#  O QUE NAO VAI PARA O REPOSITORIO
+# ============================================================
+
+# --- O QUE O BOT GERA ENQUANTO RODA -------------------------
+#
+# Sao dados de quem usa, e nao do programa: os precos lidos, o que foi comprado
+# e por quanto, os PNGs das leituras que falharam. Parte disso conta o que a
+# pessoa negocia e quanta prata movimenta - nao e coisa de repositorio publico.
+registros/
+precos.json
+precos-anterior.json
+catalogo.json
+historico.csv
+
+# Preferencias desta maquina: margem, teto de gasto, teclas, tema.
+ajustes.json
+
+# Perfil de coordenadas - e da resolucao e da instalacao de cada um. Apagar o
+# arquivo devolve o padrao do codigo, e por isso ele nunca deve vir de fora.
+coordenadas.json
+
+# --- O CATALOGO PADRAO VAI JUNTO, de proposito --------------
+#
+# O catalogo-padrao.json e os graus-base.json sao DADOS DO PROGRAMA, e nao do
+# usuario: os 121 itens com caminho de menu conhecido e o grau em que a lista do
+# dropdown comeca em cada um. Sem eles o primeiro uso comeca vazio e o bot erra
+# o grau ate se calibrar sozinho.
+
+# --- o que o Python e o empacotador geram -------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+build/
+dist/
+*.spec
+icone.ico
+
+# --- travas e temporarios -----------------------------------
+.teste_de_escrita
+.bot_em_execucao
+*.xlsx.tmp
+*.tmp
+
+# --- editores e ferramentas ---------------------------------
+.vscode/
+.idea/
+.claude/
+
+# --- ICONES DE ITEM: 27 MB que NADA usa ainda ---------------
+#
+# Sao 356 PNGs de terceiros ("Create by VGTAlves") que estao na pasta mas nao
+# aparecem em linha nenhuma de codigo. Guardar arte que ninguem le, num
+# repositorio, e guardar peso.
+#
+# Se um dia a tela Itens mostrar o icone de cada item - o bot de referencia faz
+# isso - basta apagar a linha abaixo. Os arquivos continuam no disco.
+itens pngs/

@@ -122,3 +122,7 @@ Gera `dist/Albion Arbitragem/` com o `.exe`, a interface e o Tesseract, e um `.z
 
 Automatizar ações no jogo viola os termos de uso do Albion Online e pode levar a banimento da conta.
 O uso é responsabilidade de quem executa.
+
+## Licença
+
+Todos os direitos reservados. Você pode baixar a versão das [Releases](https://github.com/RodrigoFass/Albion-Arbitragem/releases) e usar para você, mas não pode copiar, modificar, redistribuir nem usar o código em outro projeto sem autorização do autor. Detalhes em [LICENSE](LICENSE).

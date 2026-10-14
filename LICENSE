@@ -1,0 +1,31 @@
+Copyright (c) 2026 Rodrigo Fassarella
+Todos os direitos reservados.
+
+Este programa e o seu código-fonte pertencem ao autor.
+
+O QUE NÃO É PERMITIDO sem autorização prévia e por escrito do autor:
+copiar, modificar, adaptar, traduzir, distribuir, publicar, sublicenciar,
+vender ou usar como base para outro programa, no todo ou em parte.
+
+O QUE É PERMITIDO:
+  - baixar a versão publicada na página de Releases deste repositório e usá-la
+    para uso pessoal, sem modificar e sem redistribuir;
+  - ver o código no GitHub, nos limites dos Termos de Serviço do GitHub.
+
+Componentes de terceiros continuam sob as próprias licenças: o Tesseract OCR,
+que vai junto no pacote (Apache License 2.0, com a licença incluída), e as
+bibliotecas listadas em requirements.txt.
+
+O PROGRAMA É FORNECIDO "COMO ESTÁ", SEM GARANTIA DE NENHUM TIPO. O AUTOR NÃO
+RESPONDE POR NENHUM DANO, PERDA DE ITENS, DE PRATA OU DE CONTA DECORRENTE DO
+SEU USO.
+
+---
+
+Copyright (c) 2026 Rodrigo Fassarella. All rights reserved.
+
+No permission is granted to copy, modify, distribute, publish, sublicense, sell
+or create derivative works from this software, in whole or in part, without the
+author's prior written consent. Personal use of the released builds is allowed,
+without modification or redistribution. Third-party components keep their own
+licenses. Provided "as is", without warranty of any kind.

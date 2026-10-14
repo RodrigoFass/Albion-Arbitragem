@@ -453,6 +453,9 @@ def montar_pasta(destino):
     with open(os.path.join(destino, 'LEIA.txt'), 'w', encoding='utf-8') as f:
         f.write(LEIA.format(versao=comum.VERSAO))
 
+    # a licenca vai junto de cada copia, e nao so no repositorio
+    shutil.copy2(os.path.join(PASTA, 'LICENSE'), os.path.join(destino, 'LICENCA.txt'))
+
 
 # Coisas que o app cria ao rodar. Testar o pacote antes de enviar e o normal, e
 # sem esta lista o zip levaria junto as preferencias, os precos e o catalogo de

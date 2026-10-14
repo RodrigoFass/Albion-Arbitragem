@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Albion Arbitragem</title>
+  <link rel="icon" href="img/marca.svg">
+  <link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+  <div class="casca" id="casca">
+
+    <aside class="lateral">
+      <div class="marca">
+        <img src="img/marca.svg" alt="">
+        <div>
+          <strong>Albion Arbitragem</strong>
+          <span>cidade → Mercado Negro</span>
+        </div>
+      </div>
+
+      <nav class="nav" id="nav" aria-label="Telas"></nav>
+
+      <div class="lateral-pe">
+        <div id="pe-catalogo"></div>
+        <div id="pe-versao"></div>
+        <button class="botao discreto icone pequeno recolher" id="recolher"
+                title="Recolher a lateral" aria-label="Recolher a lateral"></button>
+      </div>
+    </aside>
+
+    <main class="principal">
+      <header class="topo">
+        <div>
+          <h1 id="titulo"></h1>
+          <p id="subtitulo"></p>
+        </div>
+        <div class="acoes">
+          <button class="botao discreto" id="abrir-log">
+            <span id="icone-log"></span>
+            <span>Andamento</span>
+            <span class="selo oculto" id="selo-log"></span>
+          </button>
+        </div>
+      </header>
+
+      <section class="operacao oculto" id="operacao" aria-live="polite">
+        <span class="girando"></span>
+        <span class="rotulo" id="op-rotulo"></span>
+        <span class="fraco num" id="op-andamento"></span>
+        <span class="placar num" id="op-placar"></span>
+        <button class="botao perigo-cheio pequeno" id="op-parar">Parar (F12)</button>
+        <span class="barra" id="op-barra" style="width:0"></span>
+      </section>
+
+      <div class="conteudo" id="conteudo"></div>
+
+      <section class="gaveta" id="gaveta" aria-label="Andamento">
+        <div class="cabeca">
+          <strong>Andamento</strong>
+          <span class="fraquissimo" id="log-conta"></span>
+          <span class="empurra"></span>
+          <button class="botao discreto pequeno" id="log-limpar">Limpar</button>
+          <button class="botao discreto icone pequeno" id="log-fechar" aria-label="Fechar"></button>
+        </div>
+        <pre id="log"></pre>
+      </section>
+    </main>
+  </div>
+
+  <div class="torradas" id="torradas" aria-live="polite"></div>
+
+  <script src="js/base.js"></script>
+  <script src="js/operacao.js"></script>
+  <script src="js/itens.js"></script>
+  <script src="js/historico.js"></script>
+  <script src="js/ajustes.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

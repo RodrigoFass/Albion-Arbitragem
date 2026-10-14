@@ -1,41 +1,28 @@
-# Dependencias do Albion BM
+# Dependencias do Albion Arbitragem
 #
-# Versoes fixadas nas que foram testadas. Os bots dependem de detalhes finos do
-# OCR e da captura de tela, e uma atualizacao silenciosa de Pillow ou do
-# pytesseract pode mudar o resultado de uma leitura - por isso == e nao >=.
+# Versoes fixadas nas que foram testadas. O bot depende de detalhes finos do OCR
+# e da captura de tela, e uma atualizacao silenciosa de Pillow ou do pytesseract
+# pode mudar o resultado de uma leitura - por isso == e nao >=.
 #
 #   pip install -r requirements.txt
 
-mss==10.2.0             # captura de regiao (2x mais rapido que PIL nas sondagens)
-openpyxl==3.1.5         # leitura e gravacao da Tabela-BM.xlsx
-pillow==12.3.0          # ImageGrab e redimensionamento para o OCR
+mss==10.2.0             # captura de tela
+pillow==12.3.0          # imagem para o OCR
 pynput==1.8.2           # digitacao no jogo e as teclas F11/F12
 pytesseract==0.3.13     # ponte para o Tesseract
-pywin32==312            # cliques (win32api) e checagem de janela (win32gui)
+pywin32==312            # cliques e janelas do Windows
+pywebview==6.2.1        # a janela: HTML/CSS em web/, desenhado pelo WebView2
 
-# A interface usa tkinter, que vem com o Python no Windows - nao ha dependencia
-# nova por causa do app.
-#
-# Fora do pip: o binario do Tesseract OCR precisa estar instalado.
-#   winget install UB-Mannheim.TesseractOCR
-# O caminho esperado esta em TESSERACT, no topo do comum.py.
+# Fora do pip:
+#   o Tesseract OCR          winget install UB-Mannheim.TesseractOCR
+#   o WebView2 Runtime       ja vem no Windows 11 e no 10 atualizado
 
 # --- Desenvolvimento (opcional) -------------------------------------------
-# pyflakes detecta nome indefinido e import inutil, que o py_compile deixa
-# passar porque nao sao erro de sintaxe. Rode antes de qualquer alteracao:
-#   python -m pyflakes *.py
+#   python -m pyflakes .
+#   python testes/testar.py         (logica, sem o jogo)
+#   python testes/testar_ponte.py   (tudo que a interface pede, sem janela)
 pyflakes==3.4.0
 
-# Os testes nao precisam de nada alem do que ja esta acima - nem de pytest, nem
-# do jogo aberto:
-#   python testes/testar.py             (roda em qualquer lugar)
-#   python testes/testar_interface.py   (precisa de sessao grafica)
-
 # Para gerar o aplicativo que roda sem Python instalado:
-#   pip install pyinstaller
 #   python empacotar.py
 pyinstaller==6.22.0
-
-# --- Nada disto e usado ---------------------------------------------------
-# O antigo/comprar_royal_new.py precisava destas. Ele nao e usado:
-#   pyscreenshot, PyDirectInput, opencv-python, numpy

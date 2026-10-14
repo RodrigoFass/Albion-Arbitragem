@@ -19,25 +19,36 @@
 #
 #     python testes/testar.py
 
+import atexit
+import json
 import os
+import shutil
 import sys
+import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import comum          # noqa: E402
-import coordenadas as cd   # noqa: E402
-import planilha       # noqa: E402
-import mercado        # noqa: E402
-import lucro          # noqa: E402
-import nomes          # noqa: E402
-import categorias     # noqa: E402
-import menu           # noqa: E402
-import filtros        # noqa: E402
-import conferidor     # noqa: E402
-import mercado_negro  # noqa: E402
-import catalogo       # noqa: E402
-import compra         # noqa: E402
+# OS TESTES GRAVAM NUMA PASTA TEMPORARIA, definida antes de qualquer import do
+# programa: e na importacao que cada modulo monta o caminho do seu arquivo. Antes
+# eles gravavam no precos.json de verdade, e um teste que quebrasse no meio
+# deixava precos de mentira para o app mostrar.
+_DADOS = tempfile.mkdtemp(prefix='albion-testes-')
+os.environ['ALBION_DADOS'] = _DADOS
+atexit.register(shutil.rmtree, _DADOS, True)
+
+from motor import comum          # noqa: E402
+from motor import coordenadas as cd   # noqa: E402
+from motor import mercado        # noqa: E402
+from motor import lucro          # noqa: E402
+from motor import nomes          # noqa: E402
+from motor import categorias     # noqa: E402
+from motor import menu           # noqa: E402
+from motor import filtros        # noqa: E402
+from motor import conferidor     # noqa: E402
+from motor import mercado_negro  # noqa: E402
+from motor import catalogo       # noqa: E402
+from motor import compra         # noqa: E402
 
 ok = 0
 falhas = []
@@ -170,6 +181,72 @@ checar('o teto corta, e corta o pior negocio',
        resumo_teto['custo'] <= 3_000_000 and resumo_teto['cortadas_pelo_teto'] > 0,
        str(resumo_teto['custo']))
 
+# equipamento nao empilha: cada unidade e um espaco do inventario
+_linhas_esp, _resumo_esp = lucro.montar(CATALOGO, 'Thetford', margem_minima=0.0,
+                                        espacos=150)
+
+checar('os espacos do inventario limitam as unidades',
+       _resumo_esp['unidades'] == 150, str(_resumo_esp['unidades']))
+
+checar('a linha que nao cabe inteira entra com o que cabe',
+       _linhas_esp[-1]['quantidade'] < dict(
+           (r, q) for r, q, _, _, _ in REFERENCIA)[_linhas_esp[-1]['combinacao']],
+       str(_linhas_esp[-1]))
+
+checar('e o resto fica de fora, contado',
+       _resumo_esp['sem_espaco'] == len(linhas_bruto) - len(_linhas_esp),
+       f'{_resumo_esp["sem_espaco"]} contra {len(linhas_bruto) - len(_linhas_esp)}')
+
+checar('a linha aparada tem o custo da quantidade aparada',
+       _linhas_esp[-1]['custo'] == lucro.custo_real(
+           _linhas_esp[-1]['compra']) * _linhas_esp[-1]['quantidade'])
+
+checar('sem espacos definidos nada muda',
+       lucro.montar(CATALOGO, 'Thetford', margem_minima=0.0)[1]['sem_espaco'] == 0)
+
+# --- a qualidade: so quando paga BEM mais que a Normal -----------------------
+# Os precos de cada qualidade so existem pela rede. Aqui o Mercado Negro tem um
+# pedido de qualidade 3 (Excepcional) pagando quase o dobro do da Normal.
+_banco_q = mercado._banco
+mercado.usar_banco({})
+mercado.gravar('Thetford', 'Claymore', 'T6.0', 10_000, _agora)
+mercado.atualizar('Thetford', 'Claymore', 'T6.0',
+                  qualidades={1: {'oferta': 10_000}, 3: {'oferta': 12_000}})
+mercado.gravar(mercado.MERCADO_NEGRO, 'Claymore', 'T6.0', 14_000, _agora, outro=13_000)
+mercado.atualizar(mercado.MERCADO_NEGRO, 'Claymore', 'T6.0',
+                  qualidades={1: {'pedido': 13_000}, 3: {'pedido': 25_000}})
+
+_cat_q = [('Claymore', 'T6.0', 5)]
+
+_sem_q, _ = lucro.montar(_cat_q, 'Thetford', margem_minima=0.0)
+checar('desligada, a linha e a Normal de sempre', _sem_q and _sem_q[0]['qualidade'] is None,
+       str(_sem_q))
+
+_com_q, _res_q = lucro.montar(_cat_q, 'Thetford', margem_minima=0.0, por_qualidade=True)
+checar('ligada, a qualidade que paga bem mais toma o lugar', _com_q and _com_q[0]['qualidade'] == 3,
+       str(_com_q))
+checar('comprando a oferta da propria qualidade', _com_q[0]['compra'] == 12_000)
+checar('e vendendo no maior pedido que ela atende', _com_q[0]['venda'] == 25_000)
+checar('sempre na hora: o custo e o preco da oferta, sem a taxa da ordem',
+       _com_q[0]['custo'] == 12_000 * 5)
+checar('e o resumo conta as linhas de qualidade', _res_q['por_qualidade'] == 1)
+
+# um pedido de qualidade so um pouco melhor nao vale trocar a Normal
+mercado.atualizar(mercado.MERCADO_NEGRO, 'Claymore', 'T6.0', qualidades={3: {'pedido': 15_500}})
+_pouco, _ = lucro.montar(_cat_q, 'Thetford', margem_minima=0.0, por_qualidade=True)
+checar('ganho pequeno fica na Normal, que gira mais rapido',
+       _pouco and _pouco[0]['qualidade'] is None, str(_pouco))
+
+# o pedido de qualidade MAIOR que a do item nao serve para ele
+mercado.atualizar(mercado.MERCADO_NEGRO, 'Claymore', 'T6.0',
+                  qualidades={3: {'pedido': 0}, 5: {'pedido': 90_000}})
+mercado._banco[mercado.MERCADO_NEGRO]['Claymore']['T6.0']['qualidades'].pop('3')
+_acima, _ = lucro.montar(_cat_q, 'Thetford', margem_minima=0.0, por_qualidade=True)
+checar('pedido de qualidade acima da do item nao conta',
+       _acima and _acima[0]['qualidade'] is None, str(_acima))
+
+mercado.usar_banco(_banco_q)
+
 # faltar preco e diferente de negocio ruim: um pede coleta, o outro pede item
 _, resumo_falta = lucro.montar(
     [('Item Que Nao Existe', 'T5.0', 10)], 'Thetford', margem_minima=0.0)
@@ -201,6 +278,11 @@ _cidade, _, _ = lucro.melhor_origem(
 
 checar('escolhe a cidade onde o mesmo item sai mais barato',
        _cidade == 'Martlock', _cidade)
+
+# sem linha em cidade nenhuma nao ha "melhor" - antes saia a primeira da lista
+checar('nenhuma cidade com linha da None, e nao a primeira da lista',
+       lucro.melhor_origem([('Item que ninguem leu', 'T5.0', 100)],
+                           margem_minima=0.0) is None)
 
 checar('comparar() devolve uma linha por cidade',
        len(lucro.comparar([('Assassin Jacket', 'T5.0', 100)],
@@ -303,48 +385,19 @@ grupo('o caminho de menu de cada item')
 # leitura desde o comeco: o "do" no fim do nome, a comparacao posicional, o item
 # "A" casando com o item "A ELEVADO".
 #
-# Este grupo confere o mapa contra a PLANILHA DE VERDADE. Um item que exista na
-# planilha e nao aqui e uma navegacao que vai parar no meio.
+# Este grupo confere o mapa contra o CATALOGO QUE VEM COM O PROGRAMA - os 121
+# itens que voce negocia. Um item dele sem rota aqui e uma navegacao que vai
+# parar no meio.
+with open(catalogo.ARQUIVO_INICIAL, encoding='utf-8') as _f:
+    _do_inicial = [n for itens in json.load(_f)['grupos'].values() for n in itens]
 
-# A PLANILHA NAO MORA MAIS NESTA PASTA. Ela ficou com a versao de hoje, e este
-# teste precisa dela: e a unica evidencia externa de que o mapa de menu cobre a
-# SUA lista de itens, e nao so a si mesmo.
-#
-# Procurar em dois lugares e feio. Pular a conferencia quando nao acha seria
-# pior: foi o que aconteceu na primeira vez que esta pasta rodou sozinha - as
-# duas checagens sumiram e a suite deu verde com 83 de 83. Um teste que se cala
-# quando falta o dado nao esta passando, esta ausente, e as duas coisas se
-# parecem demais no fim da saida.
-_AQUI = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_sem_rota = [n for n in _do_inicial if not categorias.navegavel(n)]
 
-for _tentativa in (os.path.join(_AQUI, 'Tabela-BM.xlsx'),
-                   os.path.join(os.path.dirname(_AQUI), 'mercado-negro',
-                                'Tabela-BM.xlsx')):
-    if os.path.exists(_tentativa):
-        planilha.ARQUIVO = _tentativa
-        break
+checar('todo item do catalogo inicial da para navegar no menu', not _sem_rota,
+       f'{len(_sem_rota)} sem rota: {", ".join(_sem_rota[:6])}')
 
-_ok_planilha, _erro_planilha = planilha.carregar(forcar=True)
-
-checar('a Tabela-BM.xlsx foi encontrada', _ok_planilha,
-       _erro_planilha or f'procurei em {planilha.ARQUIVO}')
-
-if _ok_planilha:
-
-    _da_planilha = []
-
-    for _i in range(len(planilha.abas())):
-        _f = planilha.folha(_i)
-        _da_planilha += [str(_f.cell(row=_l, column=1).value or '').strip()
-                         for _l in planilha.linhas_com_nome(_f, 29)]
-
-    _sem_rota = [n for n in _da_planilha if n and not categorias.navegavel(n)]
-
-    checar('todo item da planilha da para navegar no menu', not _sem_rota,
-           f'{len(_sem_rota)} sem rota: {", ".join(_sem_rota[:6])}')
-
-    checar('a planilha tem os 121 itens de sempre', len(_da_planilha) == 121,
-           str(len(_da_planilha)))
+checar('o catalogo inicial tem os 121 itens de sempre', len(_do_inicial) == 121,
+       str(len(_do_inicial)))
 
 checar('nao sobrou nada por confirmar', not categorias.por_confirmar(),
        ", ".join(categorias.por_confirmar()[:6]))
@@ -450,8 +503,11 @@ checar('o rotulo e o mesmo formato do resto do programa',
 checar('rotulo invalido nao vira combinacao',
        mercado.partes('Assassin') is None and mercado.partes('T5') is None)
 
-checar('o banco de precos fica ao lado do programa',
-       os.path.dirname(mercado.ARQUIVO) == comum.PASTA)
+checar('o banco de precos fica na pasta de dados',
+       os.path.dirname(mercado.ARQUIVO) == comum.PASTA_DADOS)
+
+checar('e os testes rodam numa pasta temporaria, longe dos seus arquivos',
+       comum.PASTA_DADOS == _DADOS and comum.PASTA_DADOS != comum.PASTA)
 
 
 
@@ -655,18 +711,17 @@ checar('e diz de qual submenu se trata', 'Weapons' in _motivo, _motivo)
 
 checar('e nao clica no escuro', not _tela.cliques, str(_tela.cliques))
 
-# --- os 121 itens da planilha, um por um ------------------------------------
-if _ok_planilha:
+# --- os 121 itens do catalogo inicial, um por um ----------------------------
+_nao_navegaram = []
 
-    _nao_navegaram = []
+for _nome in _do_inicial:
+    _t = Menu()
+    if not _com_menu(_t, lambda n=_nome: menu.selecionar(n))[0]:
+        _nao_navegaram.append(_nome)
 
-    for _nome in _da_planilha:
-        _t = Menu()
-        if not _com_menu(_t, lambda n=_nome: menu.selecionar(n))[0]:
-            _nao_navegaram.append(_nome)
-
-    checar('os 121 itens da planilha descem o menu inteiro', not _nao_navegaram,
-           f'{len(_nao_navegaram)}: {", ".join(_nao_navegaram[:5])}')
+checar('os 121 itens do catalogo inicial descem o menu inteiro',
+       not _nao_navegaram,
+       f'{len(_nao_navegaram)}: {", ".join(_nao_navegaram[:5])}')
 
 
 # ============================================================
@@ -974,10 +1029,10 @@ mercado.usar_banco({})
 # efeito de apertar F11 era uma linha dizendo que ia pausar.
 
 checar('a varredura espera a pausa antes de cada item',
-       'comum.pausado.is_set()' in open('conferidor.py', encoding='utf-8').read())
+       'comum.pausado.is_set()' in open(conferidor.__file__, encoding='utf-8').read())
 
 checar('e usa o aguardar_retomada em vez de um laco proprio',
-       'aguardar_retomada' in open('conferidor.py', encoding='utf-8').read())
+       'aguardar_retomada' in open(conferidor.__file__, encoding='utf-8').read())
 
 _avisos_pausa = []
 comum.definir_aviso(lambda t, v, tom: _avisos_pausa.append((t, tom)))
@@ -1039,13 +1094,13 @@ mercado.usar_banco({})
 # --- uma fonte so para as combinacoes --------------------------------------
 # A ORDEM DELAS E O QUE AGRUPA POR GRAU e faz o dropdown ser clicado o minimo
 # possivel. Duas copias sao duas ordens que podem divergir sem ninguem perceber.
-import tela_itens as _ti
-
 checar('conferidor e mercado falam da mesma lista',
        conferidor.COMBINACOES is mercado.COMBINACOES)
 
-checar('e a tela Itens usa os rotulos dessa mesma lista',
-       _ti.COMBINACOES == [mercado.rotulo(g, e) for g, e in mercado.COMBINACOES])
+# a tela Itens mostra as combinacoes na ordem da tabela do catalogo
+checar('e a tabela do catalogo usa os rotulos dessa mesma lista',
+       list(catalogo.TABELA_PADRAO)
+       == [mercado.rotulo(g, e) for g, e in mercado.COMBINACOES])
 
 checar('sao treze, do mais fraco para o mais forte',
        len(mercado.COMBINACOES) == 13
@@ -1069,7 +1124,7 @@ checar('zerar a execucao limpa tudo de uma vez',
 checar('e nao sobrou estado solto de execucao no modulo',
        not any(l.startswith(('_bordas_salvas', '_onde_estou', '_item_atual',
                              '_rotulo_atual', '_veio_do_menu'))
-               for l in open('conferidor.py', encoding='utf-8')))
+               for l in open(conferidor.__file__, encoding='utf-8')))
 
 
 # --- o custo das perguntas mais repetidas ----------------------------------
@@ -1260,15 +1315,15 @@ checar('a auditoria abre o item pela tela que recebeu',
 
 checar('e nao sobra nenhuma chamada ao menu da cidade dentro dela',
        'menu.selecionar' not in
-       open('conferidor.py', encoding='utf-8').read()
+       open(conferidor.__file__, encoding='utf-8').read()
        .split('def auditar')[1].split('def falta_conferir')[0])
 
 checar('nem ao filtro da barra de cima',
-       'filtros.' not in open('conferidor.py', encoding='utf-8').read()
+       'filtros.' not in open(conferidor.__file__, encoding='utf-8').read()
        .split('def auditar')[1].split('def falta_conferir')[0])
 
 checar('a repescagem tambem passa a tela adiante',
-       'tela=tela' in open('conferidor.py', encoding='utf-8').read()
+       'tela=tela' in open(conferidor.__file__, encoding='utf-8').read()
        .split('if repescar_depois')[1][:200])
 
 mercado.usar_banco({})
@@ -1528,7 +1583,7 @@ conferidor.zerar_amostras()
 
 
 checar('nenhum pixel e descartado por causa da borda',
-       'crop' not in open('comum.py', encoding='utf-8').read()
+       'crop' not in open(comum.__file__, encoding='utf-8').read()
        .split('def tinta_na_borda')[1].split('def _preparar')[0])
 
 
@@ -2073,38 +2128,39 @@ catalogo.zerar()
 
 
 # ============================================================
-grupo('o catalogo nasce da planilha, uma vez')
+grupo('o catalogo inicial vem com o programa')
 
-# Os 121 itens sao trabalho seu, e as tres abas ja sao a sua organizacao - a
-# divisao existe porque o inventario tem limite, e cada aba e uma viagem. Nada
-# disso deve ser redigitado.
+# Os 121 itens em tres grupos - cada grupo e uma viagem, porque o inventario tem
+# limite. Nada disso deve ser redigitado no primeiro uso.
 
-_quantos, _avisos = catalogo.importar_da_planilha()
+_ok_cat, _erro_cat = catalogo.carregar('padrao')
 
-checar('a planilha e encontrada mesmo estando na outra pasta',
-       catalogo.achar_planilha() is not None)
+checar('o primeiro uso abre o catalogo inicial', _ok_cat, _erro_cat)
 
-checar('traz os 121 itens', _quantos == 121, str(_quantos))
+checar('com os 121 itens', len(catalogo.todos()) == 121,
+       str(len(catalogo.todos())))
 
-checar('e sem aviso nenhum', not _avisos, str(_avisos[:3]))
-
-checar('as abas viram grupos',
+checar('em tres grupos',
        catalogo.grupos() == ['Armors', 'Mage  Off Hand  Cape-Bag',
                              'Melee  Ranged'],
        str(catalogo.grupos()))
 
-checar('com os itens de cada uma',
+checar('com os itens de cada um',
        len(catalogo.itens_de('Armors')) == 45
        and len(catalogo.itens_de('Melee  Ranged')) == 38)
 
-checar('todo item importado da para navegar no menu',
+checar('todo item dele da para navegar no menu',
        all(categorias.navegavel(i) for i in catalogo.todos()))
 
-# importar de novo nao duplica: quem ja esta, esta
-_de_novo, _ = catalogo.importar_da_planilha()
+# o inicial e dado do programa: salvar cria o seu, na pasta de dados
+_inicial_antes = os.path.getmtime(catalogo.ARQUIVO_INICIAL)
+catalogo.salvar()
 
-checar('importar duas vezes nao duplica nada',
-       _de_novo == 0 and len(catalogo.todos()) == 121, str(_de_novo))
+checar('salvar grava na pasta de dados',
+       os.path.exists(os.path.join(_DADOS, 'catalogo-padrao.json')))
+
+checar('e nao mexe no catalogo inicial',
+       os.path.getmtime(catalogo.ARQUIVO_INICIAL) == _inicial_antes)
 
 # --- o tamanho do trabalho, em numero ---------------------------------------
 # Isto nao e um teste de correcao, e um teste de EXPECTATIVA: se um dia esta
@@ -2572,7 +2628,7 @@ grupo('quanto tempo a varredura vai levar')
 # tempo responde, e e ele que aparece na tela na hora de escolher.
 
 catalogo.zerar()
-catalogo.importar_da_planilha()
+catalogo.carregar('padrao')
 
 _r = catalogo.resumo()
 
@@ -3008,8 +3064,9 @@ mercado_negro.esquecer_calibragem()
 _p = PainelContado(base=1)
 _relatos = []
 
-_com_painel_contado(_p, lambda: mercado_negro.varrer_item(
-    'Broadsword', conferidor.COMBINACOES, _relatos))
+_com_painel_contado(_p, lambda: conferidor.varrer_item(
+    mercado.MERCADO_NEGRO, 'Broadsword', conferidor.COMBINACOES, _relatos,
+    mercado_negro.TELA))
 
 checar('as 13 combinacoes sao lidas', len(mercado.combinacoes(
     mercado.MERCADO_NEGRO, 'Broadsword')) == 13,
@@ -3046,8 +3103,8 @@ grupo('o laco que percorre a lista e compra')
 # o lucro.py sabia montar a lista. Entre os dois nao havia nada, e a tela dizia
 # isso em voz alta.
 
-import comprador
-import historico
+from motor import comprador
+from motor import historico
 
 
 class Loja:
@@ -3063,13 +3120,27 @@ class Loja:
         self.compradas = []
         self.ordens = []
         self.painel_aberto = 0
+        self.filtros = []          # (filtro, valor) na ordem em que foram postos
 
     def selecionar(self, item):
         self.item = item
+        self.filtros.append(('item', item))
         return (True, '') if item in self.livros else (False, 'sem menu')
+
+    def grau(self, valor):
+        self.filtros.append(('grau', valor))
+        return True
+
+    def encantamento(self, valor):
+        self.filtros.append(('ench', valor))
+        return True
+
+    def limpar_filtros(self):
+        self.filtros.append(('limpar', None))
 
     def abrir_painel(self):
         self.painel_aberto += 1
+        self.filtros.append(('painel', None))
         return True
 
     def fechar_painel(self):
@@ -3117,8 +3188,12 @@ def _com_loja(loja, acao):
     reais = (menu.selecionar, compra.abrir_painel, compra.fechar_painel,
              compra.ler_livro, compra.livro_vazio, compra.criar_ordem,
              compra.comprar_uma, comum.jogo_em_foco, comum.sem_foco,
-             comum.relatar, comum.progresso, historico.registrar)
+             comum.relatar, comum.progresso, historico.registrar,
+             filtros.grau, filtros.encantamento, filtros.limpar)
 
+    filtros.grau = loja.grau
+    filtros.encantamento = loja.encantamento
+    filtros.limpar = loja.limpar_filtros
     menu.selecionar = loja.selecionar
     compra.abrir_painel = loja.abrir_painel
     compra.fechar_painel = loja.fechar_painel
@@ -3144,7 +3219,8 @@ def _com_loja(loja, acao):
         (menu.selecionar, compra.abrir_painel, compra.fechar_painel,
          compra.ler_livro, compra.livro_vazio, compra.criar_ordem,
          compra.comprar_uma, comum.jogo_em_foco, comum.sem_foco,
-         comum.relatar, comum.progresso, historico.registrar) = reais
+         comum.relatar, comum.progresso, historico.registrar,
+         filtros.grau, filtros.encantamento, filtros.limpar) = reais
         comum.zerar_contadores()
 
 
@@ -3170,6 +3246,19 @@ checar('e a ordem e criada uma vez so', len(_loja.ordens) == 1,
 checar('com as dez unidades', _loja.ordens[0][1] == 10, str(_loja.ordens))
 
 checar('e a compra entra no historico', len(_reg) == 1, str(_reg))
+
+# A COMBINACAO DA LINHA E POSTA ANTES DE ABRIR O PAINEL. O menu deixa a lista
+# com todos os graus do item, e o painel abre o primeiro: sem os filtros, a
+# compra seria de uma combinacao qualquer, julgada pela venda de outra.
+_ordem_filtros = [f for f, _ in _loja.filtros]
+
+checar('a compra poe o encantamento e o grau da linha antes de abrir o painel',
+       _ordem_filtros[:4] == ['item', 'ench', 'grau', 'painel']
+       and ('ench', 0) in _loja.filtros and ('grau', 6) in _loja.filtros,
+       str(_loja.filtros))
+
+checar('e limpa os filtros no fim, para a linha seguinte nao nascer nesta',
+       _ordem_filtros[-1] == 'limpar', str(_loja.filtros))
 
 
 # --- o caminho da compra na hora: poucas unidades --------------------------
@@ -3300,7 +3389,7 @@ grupo('o calibrador')
 # de um filtro - e nenhum deles deu erro: os tres deram numero errado em
 # silencio. O calibrador e o caminho curto para achar isso.
 
-import calibrador as _cal
+from interface import ponte as _ponte   # noqa: E402
 
 _marcas = [m for g in cd.PASSOS for m in g['marcas']]
 
@@ -3339,7 +3428,10 @@ checar('e o quadro de "sem ofertas"', 'CMP_SEM_OFERTAS' in _nomes)
 checar('o perfil grava e carrega por arquivo',
        hasattr(cd, 'salvar_perfil') and hasattr(cd, 'carregar_perfil'))
 
-checar('e o calibrador abre por uma funcao so', hasattr(_cal, 'abrir'))
+checar('e a interface abre o calibrador e le os passos pela ponte',
+       hasattr(_ponte.Api, 'abrir_calibrador')
+       and hasattr(_ponte.Api, 'calibrador_passos')
+       and hasattr(_ponte.Api, 'salvar_coordenadas'))
 
 
 # ============================================================
@@ -3349,7 +3441,7 @@ grupo('vender no Mercado Negro')
 # que ja existe (a prata entra agora) ou entrar na fila uma prata abaixo do
 # vendedor mais barato (rende mais, e pode nao vender nunca).
 
-import vendedor
+from motor import vendedor
 
 # --- o alvo sai do que foi pago -------------------------------------------
 # A prata ja saiu. O que se decide e aceitar ou nao o que o mercado oferece, e a
@@ -3412,11 +3504,10 @@ checar('sem os dois lados do livro, nao ha o que decidir', _modo is None)
 # --- a carga do dia sai do historico --------------------------------------
 # O QUE SE PRECISA SABER DE CADA UNIDADE E QUANTO ELA CUSTOU, e isso a tela do
 # jogo nao mostra. Sem esse numero nao ha alvo, e sem alvo a decisao vira chute.
-import historico as _hist
+from motor import historico as _hist
 
 _arquivo_real = _hist.ARQUIVO
-_hist.ARQUIVO = os.path.join(
-    os.path.dirname(os.path.abspath(_hist.__file__)), '_hist_de_teste.csv')
+_hist.ARQUIVO = os.path.join(_DADOS, '_hist_de_teste.csv')
 
 try:
     if os.path.exists(_hist.ARQUIVO):
@@ -3443,6 +3534,49 @@ try:
 
     checar('e some da carga quando tudo foi vendido',
            vendedor.carga_do_dia() == [], str(vendedor.carga_do_dia()))
+
+    # A UNIDADE COMPRADA POR QUALIDADE leva a qualidade junto; o resto continua
+    # com tres campos, vendido como Normal. Num arquivo a parte: o resumo do dia,
+    # logo abaixo, conta o de cima.
+    _hist_principal = _hist.ARQUIVO
+    _hist.ARQUIVO = os.path.join(_DADOS, '_hist_qualidade.csv')
+
+    _hist.comprou('Thetford', 'Bow', 'T7.0', 2, 50_000, 'na hora', qualidade=3)
+    _hist.comprou('Thetford', 'Bow', 'T7.0', 1, 40_000, 'na hora')
+
+    _carga_q = sorted(vendedor.carga_do_dia())
+
+    checar('a carga separa a unidade de qualidade da Normal',
+           _carga_q == [('Bow', 40_000, 1), ('Bow', 50_000, 2, 3)], str(_carga_q))
+
+    checar('e as duas formas se leem do mesmo jeito',
+           [vendedor.partes_da_carga(e)[3] for e in _carga_q] == [None, 3])
+
+    checar('o historico guarda e devolve a qualidade',
+           [o['qualidade'] for o in _hist.ler() if o['item'] == 'Bow'] == [3, None])
+
+    _hist.vendeu('Caerleon Mercado Negro', 'Bow', '', 3, 60_000, 'na hora')
+
+    # O ARQUIVO DE ANTES DA COLUNA NOVA: o cabecalho e reescrito uma vez, e as
+    # linhas antigas ficam
+    with open(_hist.ARQUIVO, 'w', encoding='utf-8', newline='') as _f:
+        _f.write('quando,operacao,mercado,item,combinacao,unidades,preco,total,'
+                 'modo,observacao\r\n'
+                 f'{time.strftime("%Y-%m-%d %H:%M:%S")},compra,Thetford,Spear,T6.0,'
+                 f'1,700,700,na hora,\r\n')
+
+    _hist.comprou('Thetford', 'Pike', 'T6.0', 1, 900, 'na hora', qualidade=2)
+
+    _lidas = {o['item']: o['qualidade'] for o in _hist.ler()}
+
+    checar('o historico antigo ganha a coluna sem perder linha',
+           _lidas == {'Spear': None, 'Pike': 2}, str(_lidas))
+
+    with open(_hist.ARQUIVO, encoding='utf-8') as _f:
+        checar('e o cabecalho fica com ela no fim',
+               _f.readline().strip().endswith(',qualidade'))
+
+    _hist.ARQUIVO = _hist_principal
 
     # O LUCRO AQUI E REALIZADO, e nao previsto - e a diferenca entre os dois e a
     # unica medida honesta de quanto o bot acerta.
@@ -3479,8 +3613,9 @@ comum.definir_aviso(lambda t, v, tom: _avisos.append((t, v, tom)))
 mercado.usar_banco({})
 mercado_negro.esquecer_calibragem()
 
-_com_painel_contado(PainelContado(base=1), lambda: mercado_negro.varrer_item(
-    'Broadsword', conferidor.COMBINACOES, []))
+_com_painel_contado(PainelContado(base=1), lambda: conferidor.varrer_item(
+    mercado.MERCADO_NEGRO, 'Broadsword', conferidor.COMBINACOES, [],
+    mercado_negro.TELA))
 
 comum.definir_aviso(None)
 
@@ -3521,8 +3656,9 @@ mercado_negro.esquecer_calibragem()
 _p = PainelContado(base=4)
 _relatos = []
 
-_com_painel_contado(_p, lambda: mercado_negro.varrer_item(
-    'Warbow', conferidor.COMBINACOES, _relatos))
+_com_painel_contado(_p, lambda: conferidor.varrer_item(
+    mercado.MERCADO_NEGRO, 'Warbow', conferidor.COMBINACOES, _relatos,
+    mercado_negro.TELA))
 
 checar('item de base 4 tambem le as 13',
        len(mercado.combinacoes(mercado.MERCADO_NEGRO, 'Warbow')) == 13)
@@ -3537,6 +3673,25 @@ checar('sem estourar as aberturas de dropdown',
 mercado.usar_banco(_banco_gargalo)
 mercado_negro.esquecer_calibragem()
 
+
+# ============================================================
+grupo('os identificadores: de que item e cada pacote da rede')
+
+from motor import identificadores   # noqa: E402
+
+checar('o nome vira o identificador do jogo',
+       identificadores.identificador('Broadsword', 'T5.2') == 'T5_MAIN_SWORD@2'
+       and identificadores.identificador('Broadsword', 'T6.0') == 'T6_MAIN_SWORD')
+
+checar('item sem identificador fica sem',
+       identificadores.identificador('Espada de Teste', 'T5.0') is None)
+
+with open(identificadores.ARQUIVO_IDS, encoding='utf-8') as _f:
+    _ids_jogo = json.load(_f)
+
+checar('todo item do catalogo inicial tem identificador',
+       all(i in _ids_jogo for i in _do_inicial),
+       str([i for i in _do_inicial if i not in _ids_jogo][:5]))
 
 # ============================================================
 print(f'\n===== {ok} ok, {len(falhas)} falhas =====')

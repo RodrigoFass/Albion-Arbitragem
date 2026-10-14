@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Calibrar coordenadas</title>
+  <link rel="stylesheet" href="estilo.css">
+  <style>
+    .calibrador { display: grid; grid-template-columns: minmax(0, 1fr) 340px; height: 100vh; }
+    .palco { position: relative; background: #08090b; overflow: hidden; cursor: crosshair; }
+    .palco canvas { position: absolute; left: 0; top: 0; }
+    .palco .vazio { position: absolute; inset: 0; color: var(--texto-2); }
+    .lupa { position: absolute; width: 150px; height: 150px; border-radius: 12px; border: 2px solid var(--destaque);
+      box-shadow: var(--sombra-forte); pointer-events: none; image-rendering: pixelated; background: #000; }
+    .painel { border-left: 1px solid var(--borda); background: var(--lateral); padding: var(--e5); display: flex; flex-direction: column; gap: var(--e4); overflow: auto; }
+    /* nada se espreme quando a lista de passos cresce: o painel rola */
+    .painel > * { flex-shrink: 0; }
+    .painel h1 { margin: 0; font: 600 20px/1.2 var(--fonte-titulo); letter-spacing: -0.01em; }
+    .grupos { display: flex; flex-direction: column; gap: 2px; }
+    .grupos button { display: flex; align-items: center; gap: var(--e2); height: 34px; padding: 0 var(--e3); border: 0; border-radius: var(--raio-p);
+      background: transparent; color: var(--texto-2); cursor: pointer; text-align: left; font-weight: 500; }
+    .grupos button:hover { background: var(--superficie-2); color: var(--texto); }
+    .grupos button[aria-current="step"] { background: var(--destaque-suave); color: var(--texto); }
+    .grupos .selo { margin-left: auto; }
+    .marca-atual { padding: var(--e4); border-radius: var(--raio-g); background: var(--superficie); border: 1px solid var(--borda); }
+    .marca-atual .tipo { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--destaque); }
+    .marca-atual .oque { font-weight: 600; margin: 4px 0; }
+    .coordenada { font-family: var(--fonte-mono); color: var(--texto-2); }
+  </style>
+</head>
+<body>
+  <div class="calibrador">
+    <div class="palco" id="palco">
+      <canvas id="tela"></canvas>
+      <canvas id="lupa" class="lupa oculto" width="150" height="150"></canvas>
+    </div>
+    <aside class="painel">
+      <div>
+        <h1>Calibrar coordenadas</h1>
+        <p class="nota" style="margin:6px 0 0">Marque sobre uma captura da tela do jogo: o que o bot vê é exatamente isto. O que você não marcar continua com o valor de fábrica.</p>
+      </div>
+      <div class="grupos" id="grupos"></div>
+      <div id="preparo" class="nota"></div>
+      <button class="botao principal-acao" id="capturar">Capturar a tela do jogo</button>
+      <div class="marca-atual" id="marca"></div>
+      <div class="coordenada num" id="coordenada">&nbsp;</div>
+      <div class="linha">
+        <button class="botao pequeno" id="refazer">Refazer a última</button>
+        <button class="botao discreto pequeno" id="pular">Pular esta</button>
+      </div>
+      <div style="margin-top:auto" class="pilha">
+        <div class="nota" id="contagem"></div>
+        <button class="botao principal-acao" id="gravar" disabled>Gravar</button>
+      </div>
+    </aside>
+  </div>
+  <div class="torradas" id="torradas" aria-live="polite"></div>
+
+  <script src="js/base.js"></script>
+  <script src="js/calibrador.js"></script>
+</body>
+</html>

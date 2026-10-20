@@ -230,6 +230,15 @@ class Api:
         escuta.parar_cliente()
         escuta.parar_servidor()
 
+    def _encerrar_rede(self):
+        """Ao fechar o programa: fecha o receptor e DEIXA O CLIENTE RODANDO.
+
+        O albiondata-client so manda preco depois de ver uma troca de mapa.
+        Fechado junto com o bot, cada abertura pedia outra troca de mapa; vivo,
+        ele continua sabendo onde voce esta, e o bot o adota ao abrir."""
+
+        escuta.parar_servidor()
+
     def rede(self):
         """Como esta a leitura pela rede, para a interface mostrar."""
 

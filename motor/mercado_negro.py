@@ -226,24 +226,42 @@ def abrir(item, nome_de_busca=None):
         comum.contar('abertos_pela_busca')
 
     if not abrir_painel():
+        # quem chama nao passa pelo limpar_selecao quando o painel nao abre - e
+        # a categoria do menu estragaria o item seguinte do mesmo jeito
+        _desfazer_menu()
         return False, 'o painel de venda nao abriu'
 
     return True, ''
 
 
-def limpar_selecao():
-    """Fecha o painel. E so isso.
+def _desfazer_menu():
+    """Tira a categoria que o menu deixou fixada, se o item veio por ele.
 
-    NADA DE BOTAO DE RESETAR AQUI. O da direita zera os filtros de grau e
-    encantamento DA BARRA DE CIMA, e no Mercado Negro esses filtros nao sao
-    usados: os dropdowns que interessam ficam dentro do painel de Pedido de
-    Venda e vao embora com ele. Clicar ali era um clique por item sem efeito
-    nenhum sobre a proxima leitura.
+    O MENU FIXA A CATEGORIA, E ELA FICA. Depois de "Frost Staff" pelo menu, a
+    busca de "Great Frost Staff" acontecia dentro dela, a lista vinha vazia e o
+    painel "nao abria" - e o mesmo no item seguinte. O botao de resetar da
+    direita desfaz a categoria, como na cidade."""
+
+    global _veio_do_menu
+
+    if _veio_do_menu:
+        filtros.limpar()
+        _veio_do_menu = False
+
+
+def limpar_selecao():
+    """Fecha o painel - e desfaz a categoria, se o item veio pelo menu.
+
+    FORA DISSO, NADA DE BOTAO DE RESETAR AQUI. Os filtros de grau e
+    encantamento da barra de cima nao sao usados no Mercado Negro: os dropdowns
+    que interessam ficam dentro do painel de Pedido de Venda e vao embora com
+    ele. Clicar ali em todo item seria um clique sem efeito sobre a leitura.
 
     A busca tambem nao precisa ser zerada aqui - o proximo item comeca clicando
     no reset da busca antes de digitar, que e a sequencia do bot_atualizar."""
 
     fechar_painel()
+    _desfazer_menu()
 
 #endregion
 

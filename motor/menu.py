@@ -36,6 +36,7 @@ import time
 
 from motor import categorias as cat
 from motor import comum
+from motor import coordenadas as cd
 from motor.comum import relatar
 
 #region Configuracao
@@ -127,6 +128,31 @@ def abrir():
     return _esperar_texto([0], PRIMEIRA_ENTRADA) == 'ok'
 
 
+def fechar():
+    """Fecha o menu de categoria, se ele estiver na tela.
+
+    MENU QUE FALHOU NO MEIO FICAVA ABERTO, por cima da lista. Dali em diante os
+    cliques do item seguinte - a busca, o filtro, o Comprar - caiam nas entradas
+    do menu, e o bot se perdia no meio dos itens."""
+
+    if aberto():
+        comum.clicar(cat.MENU_BOTAO, espera=0)
+        comum.contar('menu_fechado_na_falha')
+
+
+def _limpar_busca():
+    """Esvazia a caixa de busca e espera a lista voltar.
+
+    A BUSCA DO ITEM ANTERIOR FICA NA CAIXA. O menu filtra a lista por cima dela:
+    depois de "Hoarfrost Staff" pela busca, o menu de "Arcane Staff" mostrava o
+    cruzamento dos dois - nada -, e o item era pulado. E o mesmo botao de limpar
+    a busca nas duas telas, a da cidade e a do Mercado Negro."""
+
+    comum.clicar(cd.CMP_RESET)
+    comum.esperar_estavel(cd.CMP_LINHA_ITEM, ESPERA_MENU,
+                          intervalo=comum.SONDAGEM_LENTA)
+
+
 def _abrir_submenu(indices):
     """Passa o mouse no item e espera o submenu dele desenhar."""
 
@@ -153,8 +179,21 @@ def selecionar(item):
     if indices is None:
         return False, f'"{item}" nao tem caminho de menu conhecido'
 
+    _limpar_busca()
+
     if not abrir():
         return False, 'o menu de categoria nao abriu'
+
+    ok, motivo = _descer(indices, rotulos)
+
+    if not ok:
+        fechar()
+
+    return ok, motivo
+
+
+def _descer(indices, rotulos):
+    """Os niveis do menu, ja aberto, ate clicar no item. (ok, motivo)."""
 
     for nivel, esperado in enumerate(rotulos):
 

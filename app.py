@@ -152,7 +152,7 @@ def main():
 
     finally:
         if api is not None:
-            api._parar_rede()
+            api._encerrar_rede()
         comum.terminar_execucao()
 
 

@@ -268,13 +268,9 @@ _antes_do_livro = escuta.marca()
 escuta.receber({'Orders': [ordem('T6_MAIN_SWORD', '0007', 900, 4),
                            ordem('T6_MAIN_SWORD', '0007', 950, 6)]})
 
-_real_livro = comprador.compra.ler_livro
-comprador.compra.ler_livro = lambda *a, **k: (_ for _ in ()).throw(AssertionError('OCR'))
-
-try:
-    _livro = comprador._ler_livro('Thetford', 'Broadsword', 'T6.0', _antes_do_livro)
-finally:
-    comprador.compra.ler_livro = _real_livro
+# o comprador pede exatamente isto depois de filtrar a lista - sem painel e
+# sem OCR (ver comprador.comprar_linha)
+_livro = escuta.ofertas('Thetford', 'Broadsword', 'T6.0', desde=_antes_do_livro)
 
 checar('o livro de compra inteiro vem da rede, sem OCR', _livro == [(900, 4), (950, 6)], str(_livro))
 
@@ -313,7 +309,10 @@ from motor import menu         # noqa: E402
 
 
 class JogoDaCompra:
-    """A tela de compra: registra os filtros e responde pela rede ao abrir o painel."""
+    """A tela de compra: registra os filtros e responde pela rede ao filtrar.
+
+    Como a varredura: a lista filtrada faz o jogo pedir as ofertas daquela
+    combinacao, e o pacote chega sem painel nenhum aberto."""
 
     def __init__(self, manda_livro=True):
         self.filtros = []
@@ -321,13 +320,16 @@ class JogoDaCompra:
         self.compradas = 0
         self.registros = []
 
-    def abrir_painel(self):
-        self.filtros.append(('painel', None))
-        if self.manda_livro:
+    def qualidade(self, v):
+        self.filtros.append(('qualidade', v))
+        if v and self.manda_livro:
             escuta.receber({'Orders': [
                 ordem('T6_MAIN_SWORD', '0007', 9_000, 5, qualidade=1),
                 ordem('T6_MAIN_SWORD', '0007', 12_000, 2, qualidade=3),
             ]})
+
+    def abrir_painel(self):
+        self.filtros.append(('painel', None))
         return True
 
     def comprar_uma(self, esperado, aceitar=None):
@@ -343,7 +345,7 @@ def _comprar(jogo, linha):
     menu.selecionar = lambda item: (True, '')
     filtros.grau = lambda v: jogo.filtros.append(('grau', v))
     filtros.encantamento = lambda v: jogo.filtros.append(('ench', v))
-    filtros.qualidade = lambda v: jogo.filtros.append(('qualidade', v))
+    filtros.qualidade = jogo.qualidade
     filtros.limpar = lambda: jogo.filtros.append(('limpar', None))
     compra.abrir_painel = jogo.abrir_painel
     compra.fechar_painel = lambda: None
@@ -378,8 +380,8 @@ _r = _comprar(_jogo, _linha_q)
 
 checar('calibrado e com a rede, compra as duas unidades', _r['unidades'] == 2, str(_r))
 checar('sempre na hora', _r['modo'] == 'na hora', str(_r))
-checar('com o filtro de qualidade posto antes de abrir o painel',
-       _jogo.filtros.index(('qualidade', 3)) < _jogo.filtros.index(('painel', None)),
+checar('com o livro chegando pela lista filtrada, sem abrir o painel',
+       ('qualidade', 3) in _jogo.filtros and ('painel', None) not in _jogo.filtros,
        str(_jogo.filtros))
 checar('e devolvido a "Todas" no fim, antes de limpar',
        _jogo.filtros[-2:] == [('qualidade', 0), ('limpar', None)], str(_jogo.filtros))
@@ -440,6 +442,13 @@ grupo('o cliente abre so para este computador')
 
 # SEM PROCURAR NO COMPUTADOR DE VERDADE: com o cliente instalado, este teste
 # o abria de fato - e o processo vivo atropelava os testes seguintes.
+#
+# E SEM ADOTAR O CLIENTE DE VERDADE: com o bot em uso, o albiondata-client dele
+# esta rodando e mandando para a mesma porta. Adotado aqui, o parar_cliente() do
+# teste o fecharia - e o mapa que ele ja conhecia se perderia.
+_desta_porta_real = escuta.cliente_desta_porta
+escuta.cliente_desta_porta = lambda porta=None: None
+
 _achar_real = escuta.achar_cliente
 escuta.achar_cliente = lambda configurado='': None
 
@@ -495,6 +504,48 @@ finally:
     escuta.cliente_aberto = _reais[1]
 
 checar('com outro cliente ja aberto, nao abre um segundo e explica', not ok_cli and 'Feche' in msg, msg)
+
+# O CLIENTE QUE JA MANDA PARA ESTE BOT E ADOTADO: foi o bot que o deixou
+# rodando ao fechar, e ele ainda sabe em que mapa voce esta.
+_chamado.clear()
+_mortos = []
+_reais = (escuta.subprocess.Popen, escuta.cliente_aberto, escuta.subprocess.run)
+escuta.subprocess.Popen = ProcessoFalso
+escuta.cliente_aberto = lambda: True
+escuta.cliente_desta_porta = lambda porta=None: 4242
+escuta.subprocess.run = lambda args, **k: _mortos.append(args)
+
+try:
+    ok_cli, msg = escuta.iniciar_cliente(_falso, porta=8642)
+    _situacao_adotado = escuta.situacao()['cliente']
+    escuta.parar_cliente()
+finally:
+    escuta.subprocess.Popen, escuta.cliente_aberto, escuta.subprocess.run = _reais
+    escuta.cliente_desta_porta = lambda porta=None: None
+
+checar('o cliente que ja manda para este bot e reaproveitado, sem abrir outro',
+       ok_cli and _situacao_adotado == 'rodando' and 'args' not in _chamado, msg)
+
+checar('e desligar a rede fecha o adotado tambem',
+       any('4242' in a for a in _mortos), str(_mortos))
+
+# FECHAR O BOT NAO FECHA O CLIENTE
+from interface import ponte as _ponte   # noqa: E402
+
+_reais = (escuta.parar_cliente, escuta.parar_servidor)
+_chamadas_fim = []
+escuta.parar_cliente = lambda: _chamadas_fim.append('cliente')
+escuta.parar_servidor = lambda: _chamadas_fim.append('servidor')
+
+try:
+    _ponte.Api._encerrar_rede(None)
+finally:
+    escuta.parar_cliente, escuta.parar_servidor = _reais
+
+checar('ao fechar o bot, o receptor fecha e o cliente fica rodando',
+       _chamadas_fim == ['servidor'], str(_chamadas_fim))
+
+escuta.cliente_desta_porta = _desta_porta_real
 
 
 # ============================================================

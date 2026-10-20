@@ -81,7 +81,9 @@ def _aceitar(linha, plano, gasto_ate_agora, teto_de_prata, margem, taxa):
 
     def julgar(cobrado):
 
-        teto_do_preco = compra.preco_maximo(linha['venda'], margem, taxa)
+        teto_do_preco = compra.preco_maximo(
+            linha['venda'], margem, taxa,
+            ordem_na_venda=linha.get('venda_por_ordem', False))
 
         if cobrado > teto_do_preco:
             return False, (f'{comum.fmt(cobrado)} passa do teto de '
@@ -147,11 +149,17 @@ def comprar_linha(linha, origem, margem, taxa, gasto_ate_agora=0,
     painel = False
 
     try:
-        filtros.encantamento(ench)
-        filtros.grau(grau)
+        aplicados = [filtros.encantamento(ench), filtros.grau(grau)]
 
         if qualidade:
-            filtros.qualidade(qualidade)
+            aplicados.append(filtros.qualidade(qualidade))
+
+        # FILTRO QUE NAO ENTROU E COMPRA DE OUTRA COMBINACAO: o livro na tela
+        # seria o do grau de antes, julgado pela venda deste
+        if filtros.NAO_APLICADO in aplicados:
+            saida['motivo'] = 'o filtro de grau ou encantamento nao foi aplicado'
+            comum.contar('linhas_sem_filtro')
+            return saida
 
         # O LIVRO DE AGORA, e nao o da varredura. A lista foi montada com precos
         # de antes, e o mercado nao esperou.
@@ -198,7 +206,8 @@ def comprar_linha(linha, origem, margem, taxa, gasto_ate_agora=0,
 
         plano, modo, motivo = compra.decidir(
             ofertas, linha['venda'], margem, quanto, taxa, travado,
-            conf.get('ordem_a_partir_de'), conf.get('na_hora_acima_de'))
+            conf.get('ordem_a_partir_de'), conf.get('na_hora_acima_de'),
+            ordem_na_venda=linha.get('venda_por_ordem', False))
 
         if plano is None:
             saida['motivo'] = motivo

@@ -287,7 +287,10 @@
       { chave: 'qualidade', titulo: 'Qualidade', formato: (v) => v ? h('span', { class: 'selo destaque' }, nomeDaQualidade(v)) : h('span', { class: 'fraquissimo' }, 'qualquer') },
       { chave: 'quantidade', titulo: 'Quant.', direita: true, formato: fmt },
       { chave: 'compra', titulo: 'Compra', direita: true, formato: fmt },
-      { chave: 'venda', titulo: 'Venda', direita: true, formato: fmt },
+      // o caminho da venda que a conta usou: o pedido de compra (na hora) ou uma
+      // prata abaixo da fila (por ordem, com os 2,5% a mais)
+      { chave: 'venda', titulo: 'Venda', direita: true,
+        formato: (v, l) => h('span', null, fmt(v), h('span', { class: 'fraquissimo' }, l.venda_por_ordem ? ' · ordem' : ' · na hora')) },
       { chave: 'margem_bruta', titulo: 'Margem bruta', direita: true, formato: (v) => pct(v) },
       { chave: 'margem', titulo: 'Margem real', direita: true, formato: (v) => pct(v) },
       { chave: 'lucro', titulo: 'Lucro', direita: true, formato: fmt },
@@ -426,6 +429,7 @@
 
     const tab = tabela([
       { chave: 'item', titulo: 'Item', classe: 'item' },
+      { chave: 'combinacao', titulo: 'Combinação', formato: (v) => v || h('span', { class: 'fraquissimo' }, '?') },
       { chave: 'qualidade', titulo: 'Qualidade', formato: (v) => v ? nomeDaQualidade(v) : h('span', { class: 'fraquissimo' }, 'Normal') },
       { chave: 'pago', titulo: 'Pago', direita: true, formato: fmt },
       { chave: 'quantidade', titulo: 'Quant.', direita: true, formato: fmt },
@@ -447,7 +451,7 @@
         h('p', { class: 'nota', style: { margin: '12px 0 0' } },
           'O que já tem comprador perto do alvo sai na hora; o resto entra na fila uma prata abaixo do vendedor mais barato. Nada é vendido abaixo do custo.')),
       h('div', { class: 'grade-4' }, pago, receber, saldo, parada),
-      h('div', { class: 'linha' }, h('span', { class: 'secao-titulo', style: { margin: 0 } }, 'Carga de hoje'),
+      h('div', { class: 'linha' }, h('span', { class: 'secao-titulo', style: { margin: 0 } }, 'Carga a vender'),
         h('span', { class: 'empurra' }), porque, simular, deVerdade),
       lista,
       nota);
@@ -470,13 +474,13 @@
         nota.textContent = 'Os preços aqui são a última leitura do Mercado Negro; no jogo a decisão é refeita com o livro do momento.';
       } else {
         for (const c of [pago, receber, parada]) c.mostrar(null);
-        trocar(lista, h('div', { class: 'cartao' }, vazio('caixa', 'Nada para vender hoje',
-          'A carga aparece aqui depois que o bot compra alguma coisa — ela vem do histórico, com o preço pago por cada unidade.',
+        trocar(lista, h('div', { class: 'cartao' }, vazio('caixa', 'Nada para vender',
+          `A carga aparece aqui depois que o bot compra alguma coisa — ela vem do histórico das últimas ${r.horas} horas, com o preço pago por cada unidade.`,
           { rotulo: 'Ir para Comprar', fazer: () => irPasso('comprar') })));
         nota.textContent = '';
       }
 
-      resumoPasso('vender', r.unidades ? `${fmt(r.unidades)} unidades na carga` : 'sem carga hoje');
+      resumoPasso('vender', r.unidades ? `${fmt(r.unidades)} unidades na carga` : 'sem carga');
       habilitar();
     }
 
@@ -536,7 +540,7 @@
       // os resumos dos outros passos tambem, para o cabecalho dizer o que falta
       if (passo !== 'precos') api('mercados').then((d) => precos.resumir(d));
       api('estado').then((e) => {
-        if (passo !== 'vender') resumoPasso('vender', e.carga ? `${fmt(e.carga)} unidades na carga` : 'sem carga hoje');
+        if (passo !== 'vender') resumoPasso('vender', e.carga ? `${fmt(e.carga)} unidades na carga` : 'sem carga');
         if (passo !== 'comprar') {
           const atual = passosEl.querySelector('[data-resumo="comprar"]').textContent.trim();
           if (!e.precos) resumoPasso('comprar', 'leia os preços primeiro');

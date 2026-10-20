@@ -401,22 +401,13 @@ def ultimo_do_item(local, item, desde, prazo=ESPERA, qualidade=1):
     O PEDIDO E O MAIOR QUE O ITEM ATENDE: os de qualidade <qualidade> ou menor.
     A venda e a menor oferta da propria qualidade."""
 
-    troncos = {identificadores.tronco(item)} - {None}
-
     def tentar():
-        with _trava:
-            recentes = [(l.get('seq', 0),
-                         (g, e), q, l)
-                        for (lo, t, g, e, q), l in _livros.items()
-                        if lo == local and t in troncos
-                        and l.get('seq', 0) > desde]
+        painel = _painel(local, item, desde)
 
-        if not recentes:
+        if painel is None:
             return None
 
-        # a combinacao do painel aberto e a do pacote mais recente do item
-        _, combinacao, _, _ = max(recentes, key=lambda a: a[0])
-        dela = {q: l for _, c, q, l in recentes if c == combinacao}
+        _, dela = painel
 
         pedidos = [_melhor(l, 'pedidos') for q, l in dela.items() if q <= qualidade]
         pedidos = [p for p in pedidos if p]
@@ -425,6 +416,38 @@ def ultimo_do_item(local, item, desde, prazo=ESPERA, qualidade=1):
                 _melhor(dela.get(qualidade, {}), 'ofertas'))
 
     return _esperar(tentar, prazo)
+
+
+def _painel(local, item, desde):
+    """((grau, ench), {qualidade: livro}) do item aberto, ou None.
+
+    A combinacao do painel aberto e a do pacote mais recente do item."""
+
+    troncos = {identificadores.tronco(item)} - {None}
+
+    with _trava:
+        recentes = [(l.get('seq', 0), (g, e), q, l)
+                    for (lo, t, g, e, q), l in _livros.items()
+                    if lo == local and t in troncos
+                    and l.get('seq', 0) > desde]
+
+    if not recentes:
+        return None
+
+    _, combinacao, _, _ = max(recentes, key=lambda a: a[0])
+
+    return combinacao, {q: l for _, c, q, l in recentes if c == combinacao}
+
+
+def combinacao_aberta(local, item, desde):
+    """'T5.2' do item aberto no painel, pelo pacote mais recente, ou None.
+
+    Nao espera: serve para conferir, depois que ultimo_do_item ja viu o pacote,
+    se o painel abriu a combinacao que se pretendia vender."""
+
+    painel = _painel(local, item, desde)
+
+    return mercado.rotulo(*painel[0]) if painel else None
 
 
 def esquecer():

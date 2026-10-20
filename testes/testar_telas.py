@@ -147,9 +147,18 @@ def rodar():
         checar('Comprar: os campos com a unidade dentro',
                visivel('[data-tela=operacao] .com-unidade') >= 3)
 
+        texto = js("[...document.querySelectorAll('[data-tela=operacao] .tabela tbody tr')]"
+                   ".map(t => t.textContent).join(' ')") or ''
+        checar('Comprar: a venda diz o caminho, na hora ou por ordem',
+               '· na hora' in texto or '· ordem' in texto)
+
         js("document.querySelector('[data-passo=vender]').click()", 2.0)
         linhas = visivel('[data-tela=operacao] .tabela tbody tr')
-        checar('Vender: a carga de hoje', linhas > 0, f'{linhas} linhas')
+        checar('Vender: a carga a vender', linhas > 0, f'{linhas} linhas')
+
+        texto = js("[...document.querySelectorAll('[data-tela=operacao] .tabela tbody tr')]"
+                   ".filter(t => t.offsetParent !== null).map(t => t.textContent).join(' ')") or ''
+        checar('Vender: com a combinacao comprada', 'T5.2' in texto, texto[:120])
 
         # ---------------------------------------------------------------------
         grupo('Itens')

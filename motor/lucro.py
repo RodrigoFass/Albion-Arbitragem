@@ -36,7 +36,7 @@
 # Por isso as duas contas moram aqui e aparecem lado a lado. A bruta existe para
 # voce comparar com o que ve por ai; a liquida e a que decide.
 #
-# Antes de alterar: python -m pyflakes arbitragem.py
+# Antes de alterar: python -m pyflakes motor/lucro.py
 
 from motor import mercado
 
@@ -76,6 +76,13 @@ MARGEM_PADRAO = 0.23
 # quem comprava comprou. Seis horas e o meio-termo entre exigir uma coleta nova
 # a cada rodada e decidir sobre dado morto.
 IDADE_MAXIMA_PADRAO = 6.0
+
+# Quanto abaixo do vendedor mais barato entrar na fila de venda.
+#
+# UMA PRATA. A lista do jogo ordena por preco, e uma unidade abaixo poe a oferta
+# na frente de todas as outras daquele preco. Mora aqui, e nao so no vendedor,
+# porque a lista de compras precisa saber por quanto a venda por ordem sai.
+ABAIXO_DO_MENOR = 1
 
 #endregion
 
@@ -151,9 +158,54 @@ def venda_minima(compra, margem=MARGEM_PADRAO, taxa=TAXA_PADRAO,
     return int(custo * (1 + margem) / sobra + 0.999)
 
 
+def melhor_venda(oferta, pedido, taxa=TAXA_PADRAO):
+    """Por quanto da para vender de verdade. Devolve (preco, por_ordem).
+
+    O MENOR PEDIDO DE VENDA NAO E O QUE SE RECEBE. Ele e a fila de quem ja esta
+    vendendo; o que entra no bolso sai por um dos dois caminhos do vendedor:
+
+        na hora      o maior pedido de compra, pagando so a taxa de venda
+        por ordem    uma prata abaixo da fila, pagando tambem os 2,5% de ordem
+
+    A conta antiga usava o preco da fila com a taxa de quem vende na hora - um
+    caminho que nao existe. Nos precos lidos do Mercado Negro o pedido de compra
+    ficava, na mediana, em 65% da fila: a lista prometia lucro que nenhum dos dois
+    caminhos entregava, e o proprio vendedor recusava vender o que ela aprovou.
+
+    Fica o caminho que rende mais por unidade. O vendedor refaz a escolha com o
+    livro do momento, com as mesmas contas.
+
+    PEDIDO ACIMA DA FILA E LEITURA ERRADA, e fica de fora. Quem quisesse comprar
+    por mais que a oferta mais barata ja teria comprado dela; nos precos lidos por
+    OCR apareceram pedidos de 49 vezes a fila. Ignorar um pedido verdadeiro so
+    deixa a conta mais conservadora; aceitar um falso faria comprar prejuizo.
+
+    (None, None) quando nao ha nenhum dos dois."""
+
+    caminhos = []
+
+    if pedido and pedido > 0 and (not oferta or pedido <= oferta):
+        caminhos.append((receita_real(pedido, taxa), pedido, False))
+
+    if oferta and oferta > ABAIXO_DO_MENOR:
+        na_fila = oferta - ABAIXO_DO_MENOR
+        caminhos.append((receita_real(na_fila, taxa, ordem_na_venda=True),
+                         na_fila, True))
+
+    if not caminhos:
+        return None, None
+
+    _, preco, por_ordem = max(caminhos)
+
+    return preco, por_ordem
+
+
 def linha(item, rot, compra, venda, quantidade, taxa=TAXA_PADRAO,
           ordem_na_compra=True, ordem_na_venda=False):
-    """Uma linha da lista de compras, com as duas margens e os totais."""
+    """Uma linha da lista de compras, com as duas margens e os totais.
+
+    <venda> e o preco do caminho de venda; <ordem_na_venda> diz qual e ele, e
+    vai junto na linha porque o comprador refaz a conta com ele."""
 
     custo = custo_real(compra, ordem_na_compra)
     receita = receita_real(venda, taxa, ordem_na_venda)
@@ -163,6 +215,7 @@ def linha(item, rot, compra, venda, quantidade, taxa=TAXA_PADRAO,
         'combinacao': rot,
         'compra': compra,
         'venda': venda,
+        'venda_por_ordem': ordem_na_venda,
         'quantidade': quantidade,
         'margem_bruta': bruto(compra, venda),
         'margem': liquido(compra, venda, taxa, ordem_na_compra, ordem_na_venda),
@@ -187,25 +240,34 @@ GANHO_MINIMO_DA_QUALIDADE = 0.15
 
 
 def _linha_normal(item, rot, origem, destino, quantidade, taxa, idade_maxima,
-                  ordem_na_compra, ordem_na_venda):
+                  ordem_na_compra):
     """A linha de sempre: a oferta mais barata contra a venda Normal.
+
+    A venda e a de melhor_venda(): o pedido de compra do destino ou a fila dele,
+    o que render mais depois das taxas de cada caminho.
 
     Devolve (linha, None) ou (None, motivo): 'sem_compra', 'sem_venda', 'velho'."""
 
     preco_compra, idade_compra = mercado.ler(origem, item, rot)
-    preco_venda, idade_venda = mercado.ler(destino, item, rot)
+    oferta, idade_venda = mercado.ler(destino, item, rot)
 
     if preco_compra is None:
         return None, 'sem_compra'
 
-    if preco_venda is None:
+    if oferta is None:
         return None, 'sem_venda'
 
     if idade_maxima is not None and max(idade_compra, idade_venda) > idade_maxima:
         return None, 'velho'
 
-    l = linha(item, rot, preco_compra, preco_venda, quantidade, taxa,
-              ordem_na_compra, ordem_na_venda)
+    venda, por_ordem = melhor_venda(oferta, mercado.ler_outro(destino, item, rot),
+                                    taxa)
+
+    if venda is None:
+        return None, 'sem_venda'
+
+    l = linha(item, rot, preco_compra, venda, quantidade, taxa,
+              ordem_na_compra, por_ordem)
     l['qualidade'] = None
 
     return l, None
@@ -257,7 +319,7 @@ def _linha_de_qualidade(item, rot, origem, destino, quantidade, taxa,
 def montar(catalogo, origem, destino=None, margem_minima=MARGEM_PADRAO,
            taxa=TAXA_PADRAO, idade_maxima=IDADE_MAXIMA_PADRAO,
            por_margem_bruta=False, teto=None,
-           ordem_na_compra=True, ordem_na_venda=False, espacos=None,
+           ordem_na_compra=True, espacos=None,
            por_qualidade=False):
     """A lista de compras de uma cidade. Devolve (linhas, resumo).
 
@@ -292,7 +354,7 @@ def montar(catalogo, origem, destino=None, margem_minima=MARGEM_PADRAO,
     for item, rot, quantidade in catalogo:
 
         l, motivo = _linha_normal(item, rot, origem, destino, quantidade, taxa,
-                                  idade_maxima, ordem_na_compra, ordem_na_venda)
+                                  idade_maxima, ordem_na_compra)
 
         if l is not None and (l['margem_bruta'] if por_margem_bruta
                               else l['margem']) < margem_minima:
@@ -356,7 +418,7 @@ def montar(catalogo, origem, destino=None, margem_minima=MARGEM_PADRAO,
                 qualidade = l.get('qualidade')
                 l = linha(l['item'], l['combinacao'], l['compra'], l['venda'],
                           livres, taxa,
-                          ordem_na_compra and not qualidade, ordem_na_venda)
+                          ordem_na_compra and not qualidade, l['venda_por_ordem'])
                 l['qualidade'] = qualidade
             cabem.append(l)
             livres -= l['quantidade']

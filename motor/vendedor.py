@@ -31,10 +31,18 @@
 # O ALVO SAI DO QUE FOI PAGO, e nao de uma tabela.
 #
 # A prata ja saiu. O que se decide aqui e aceitar ou nao o que o mercado esta
-# oferecendo, e a unica referencia honesta e o custo real daquela unidade - com
-# a taxa de ordem da compra ja embutida, porque ela tambem ja foi paga.
+# oferecendo, e a unica referencia honesta e o custo real daquela unidade. O
+# historico ja grava esse custo real: a compra por ordem com os 2,5% dentro, a
+# compra na hora sem taxa nenhuma. Somar a taxa de ordem de novo aqui punha o
+# alvo 2,5% acima do que a lista tinha aprovado.
 #
-# Antes de alterar: python -m pyflakes vendedor.py
+#
+# NADA SAI ABAIXO DO PISO, NEM NA HORA. O piso e o "perto do alvo" da tela, e
+# nunca menos que o custo. Ele e conferido no dialogo de CADA unidade: vendido o
+# primeiro pedido de compra, a unidade seguinte casa com o pedido de baixo, que
+# pode ser bem menor - e antes o bot vendia todas sem olhar.
+#
+# Antes de alterar: python -m pyflakes motor/vendedor.py
 
 import time
 
@@ -56,12 +64,17 @@ from motor.comum import relatar
 # de nao ficar com a carga esperando - e uma carga parada nao rende nada.
 PERTO_DO_ALVO = 0.95
 
-# Quanto abaixo do vendedor mais barato entrar na fila.
+# Quanto abaixo do vendedor mais barato entrar na fila. Uma prata - ver o lucro,
+# que usa o mesmo numero para prever a venda por ordem.
+ABAIXO_DO_MENOR = lucro.ABAIXO_DO_MENOR
+
+# Quantas horas para tras a carga olha.
 #
-# UMA PRATA. Nao e simbolico: a lista do jogo ordena por preco, e uma unidade
-# abaixo poe a sua oferta na frente de todas as outras daquele preco. Baixar
-# mais que isso e dar desconto para ninguem.
-ABAIXO_DO_MENOR = 1
+# A CARGA NAO ACABA A MEIA-NOITE. Antes ela comecava as 0h: quem comprava as
+# 23h50 e chegava ao Mercado Negro as 0h10 encontrava a carga vazia. Dois dias
+# cobrem a viagem com folga; mais que isso, o que sobrou quase sempre foi vendido
+# a mao, fora do bot, e ficaria na carga para sempre.
+HORAS_DA_CARGA = 48
 
 # Limites, em segundos.
 ESPERA_PAINEL = 2.50
@@ -82,7 +95,9 @@ PASTA_FALHAS = 'falhas_venda'
 
 
 def alvo(pago, margem=None, taxa=None, por_ordem=False):
-    """Por quanto e preciso vender esta unidade. Ver lucro.venda_minima."""
+    """Por quanto e preciso vender esta unidade. Ver lucro.venda_minima.
+
+    <pago> e o custo real, como o historico grava - ver o cabecalho."""
 
     conf = ajustes.atuais()
 
@@ -90,8 +105,19 @@ def alvo(pago, margem=None, taxa=None, por_ordem=False):
         pago,
         conf['margem'] if margem is None else margem,
         conf['taxa'] if taxa is None else taxa,
-        ordem_na_compra=True,
+        ordem_na_compra=False,
         ordem_na_venda=por_ordem)
+
+
+def piso(pago, margem=None, taxa=None, perto=PERTO_DO_ALVO):
+    """O menor pedido de compra que ainda serve para vender NA HORA.
+
+    E o "perto do alvo" da tela, mas nunca abaixo do custo: com o "perto" em 50%
+    o alvo podia cair abaixo do que foi pago, e a tela promete que nada e vendido
+    abaixo do custo."""
+
+    return max(int(alvo(pago, margem, taxa) * perto + 0.999),
+               alvo(pago, 0, taxa))
 
 
 def decidir(pago, pedido_de_compra, menor_venda, margem=None, taxa=None,
@@ -102,11 +128,18 @@ def decidir(pago, pedido_de_compra, menor_venda, margem=None, taxa=None,
 
     A ORDEM DAS PERGUNTAS IMPORTA. Primeiro se pergunta se da para receber AGORA
     por um valor aceitavel - porque receber agora e melhor que receber talvez.
-    So quando nao da e que se calcula a fila."""
+    So quando nao da e que se calcula a fila.
+
+    PEDIDO ACIMA DA FILA E LEITURA ERRADA, como no lucro.melhor_venda: quem
+    quisesse pagar mais que a oferta mais barata ja teria comprado dela."""
+
+    if pedido_de_compra and menor_venda and pedido_de_compra > menor_venda:
+        comum.contar('pedido_acima_da_fila')
+        pedido_de_compra = None
 
     alvo_agora = alvo(pago, margem, taxa, por_ordem=False)
 
-    if pedido_de_compra and pedido_de_compra >= alvo_agora * perto:
+    if pedido_de_compra and pedido_de_compra >= piso(pago, margem, taxa, perto):
         return 'na hora', pedido_de_compra, (
             f'{comum.fmt(pedido_de_compra)} e '
             f'{pedido_de_compra / alvo_agora * 100:.0f}% do alvo de '
@@ -154,12 +187,17 @@ def ler_precos():
     return pedido, menor_venda
 
 
-def _dialogo_confere(esperado):
-    """True quando o dialogo esta na tela e o valor dele ainda serve.
+def _dialogo_confere(esperado, minimo=None, primeira=True):
+    """(ok, recebido, motivo): o dialogo esta na tela e o valor dele serve?
 
     A MESMA LICAO DA COMPRA: o numero que o jogo mostra antes de confirmar e a
     unica fonte que nao passou pelo nosso OCR duas vezes nem pela nossa
-    aritmetica. La ele evitou pagar caro; aqui evita vender barato."""
+    aritmetica. La ele evitou pagar caro; aqui evita vender barato - desde que
+    alguem compare o numero com o <minimo>, o que antes ninguem fazia.
+
+    DIALOGO ILEGIVEL SO PASSA NA PRIMEIRA UNIDADE. Ali o <esperado> acabou de
+    ser lido do livro aberto. Da segunda em diante o pedido da frente pode ter
+    acabado, e o numero que valeria e justamente o que nao deu para ler."""
 
     if not VERIFICAR_DIALOGO:
         return True, esperado, ''
@@ -175,20 +213,32 @@ def _dialogo_confere(esperado):
         _guardar_falha('dialogo_ausente', [texto])
         return False, None, 'o dialogo de confirmacao nao esta na tela'
 
-    recebido = comum.numero_valido(texto)
+    recebido = comum.valor_do_dialogo(texto)
 
     if recebido is None:
         comum.contar('dialogo_de_venda_ilegivel')
-        return True, esperado, ''
+
+        if primeira:
+            return True, esperado, ''
+
+        _guardar_falha('dialogo_ilegivel', [texto])
+        return False, None, ('o dialogo nao deu para ler, e o pedido da frente '
+                             'pode ter acabado')
+
+    if minimo and recebido < minimo:
+        comum.contar('vendas_abaixo_do_piso')
+        return False, recebido, (f'o jogo pagaria {comum.fmt(recebido)}, abaixo '
+                                 f'do piso de {comum.fmt(minimo)}')
 
     return True, recebido, ''
 
 
-def vender_na_hora(esperado):
+def vender_na_hora(esperado, minimo=None, primeira=True):
     """Vender → Vender. Devolve (ok, recebido, motivo).
 
     SAO DOIS CLIQUES E UM DIALOGO, do mesmo jeito da compra: o primeiro abre a
-    acao, o segundo pede a venda, e o dialogo diz quanto entra."""
+    acao, o segundo pede a venda, e o dialogo diz quanto entra. Abaixo do
+    <minimo>, o dialogo e recusado."""
 
     antes = comum.assinatura(cd.PRECO_VENDA)
 
@@ -197,7 +247,7 @@ def vender_na_hora(esperado):
     try:
         comum.clicar(cd.BM_VENDER)
 
-        ok, recebido, motivo = _dialogo_confere(esperado)
+        ok, recebido, motivo = _dialogo_confere(esperado, minimo, primeira)
 
         if not ok:
             comum.clicar(cd.CMP_NAO_COMPRAR)
@@ -265,14 +315,25 @@ def _guardar_falha(nome, extras):
 
 
 def vender_item(item, pago, unidades, margem=None, taxa=None,
-                de_verdade=True, perto=PERTO_DO_ALVO, qualidade=None):
+                de_verdade=True, perto=PERTO_DO_ALVO, qualidade=None,
+                combinacao='', pago_se_incerto=None):
     """Vende uma combinacao no Mercado Negro. Devolve o resultado.
 
     <qualidade> so vem na unidade comprada por qualidade: ai o pedido que conta
-    e o maior que ela atende, e nao o da Normal."""
+    e o maior que ela atende, e nao o da Normal.
 
-    saida = {'item': item, 'unidades': 0, 'recebido': 0, 'modo': '',
-             'motivo': ''}
+    <combinacao> e a da carga ('T5.2'). O painel abre o item que estiver no
+    inventario, e o vendedor nao escolhe o grau; com a rede mandando, o pacote
+    diz qual combinacao abriu, e se for outra nao vende - o custo que decidiria
+    a venda e o desta, e nao o daquela.
+
+    <pago_se_incerto> e o custo para decidir quando nao da para confirmar a
+    combinacao aberta - ver custos_se_incerto()."""
+
+    taxa = ajustes.atuais()['taxa'] if taxa is None else taxa
+
+    saida = {'item': item, 'unidades': 0, 'recebido': 0, 'em_ordem': 0,
+             'modo': '', 'motivo': ''}
 
     aberto_em = escuta.marca()
 
@@ -289,11 +350,30 @@ def vender_item(item, pago, unidades, margem=None, taxa=None,
         rede = escuta.ultimo_do_item(mercado.MERCADO_NEGRO, item, aberto_em,
                                      qualidade=qualidade or 1)
 
+        aberta = None
+
         if rede is not None and rede[1] is not None:
+
+            aberta = escuta.combinacao_aberta(mercado.MERCADO_NEGRO, item,
+                                              aberto_em)
+
+            if combinacao and aberta and aberta != combinacao:
+                comum.contar('painel_em_outra_combinacao')
+                saida['motivo'] = (f'o painel abriu {aberta}, e a carga e '
+                                   f'{combinacao}')
+                return saida
+
             pedido, menor = rede
             comum.contar('livros_pela_rede')
         else:
             pedido, menor = ler_precos()
+
+        # A COMBINACAO SO VAI PARA O HISTORICO QUANDO A REDE CONFIRMA qual foi.
+        # Gravada no chute, a venda abateria a compra de outro grau na carga.
+        confirmada = bool(combinacao) and aberta == combinacao
+
+        if not confirmada and pago_se_incerto:
+            pago = pago_se_incerto
 
         modo, preco, motivo = decidir(pago, pedido, menor, margem, taxa, perto)
 
@@ -306,11 +386,15 @@ def vender_item(item, pago, unidades, margem=None, taxa=None,
 
         if not de_verdade:
             saida['unidades'] = unidades
-            saida['recebido'] = (preco or 0) * unidades
+            liquido = int(lucro.receita_real(preco, taxa, modo == 'ordem') * unidades)
+            saida['em_ordem' if modo == 'ordem' else 'recebido'] = liquido
             return saida
+
+        vendida = combinacao if confirmada else ''
 
         if modo == 'na hora':
 
+            minimo = piso(pago, margem, taxa, perto)
             levadas = 0
             recebido = 0
 
@@ -319,20 +403,24 @@ def vender_item(item, pago, unidades, margem=None, taxa=None,
                 if comum.deve_parar():
                     break
 
-                ok, entrou, motivo = vender_na_hora(preco)
+                ok, entrou, motivo = vender_na_hora(preco, minimo,
+                                                    primeira=not levadas)
 
                 if not ok:
                     saida['motivo'] = motivo
                     break
 
+                entrou = entrou or preco
+                liquido = int(lucro.receita_real(entrou, taxa))
+
                 levadas += 1
-                recebido += entrou or preco
+                recebido += liquido
 
-                historico.vendeu(mercado.MERCADO_NEGRO, item, '', 1,
-                                 entrou or preco, modo='na hora',
-                                 qualidade=qualidade)
+                historico.vendeu(mercado.MERCADO_NEGRO, item, vendida, 1,
+                                 entrou, modo='na hora', qualidade=qualidade,
+                                 liquido=liquido)
 
-                comum.avisar(f'vendeu {item}', comum.fmt(entrou or preco), 'ok')
+                comum.avisar(f'vendeu {item}', comum.fmt(entrou), 'ok')
 
             saida['unidades'] = levadas
             saida['recebido'] = recebido
@@ -345,12 +433,15 @@ def vender_item(item, pago, unidades, margem=None, taxa=None,
             saida['motivo'] = motivo
             return saida
 
+        # A ORDEM NAO E PRATA RECEBIDA: ela fica na fila e pode nunca vender.
+        # Vai para o historico como ordem, e o saldo nao a conta.
         saida['unidades'] = unidades
-        saida['recebido'] = preco * unidades
+        saida['em_ordem'] = int(lucro.receita_real(preco, taxa, True) * unidades)
 
-        historico.vendeu(mercado.MERCADO_NEGRO, item, '', unidades, preco,
-                         modo='ordem', observacao='ordem criada, ainda nao paga',
-                         qualidade=qualidade)
+        historico.vendeu(mercado.MERCADO_NEGRO, item, vendida, unidades, preco,
+                         modo=historico.ORDEM,
+                         observacao='ordem criada, ainda nao paga',
+                         qualidade=qualidade, liquido=saida['em_ordem'])
 
         comum.avisar(f'ordem de {item}', comum.fmt(preco))
 
@@ -360,8 +451,27 @@ def vender_item(item, pago, unidades, margem=None, taxa=None,
     return saida
 
 
+def custos_se_incerto(carga):
+    """O custo que decide cada entrada quando o painel aberto nao e confirmado.
+
+    E O PAGO DELA - menos quando o mesmo item esta na carga em mais de uma
+    combinacao. Sem a rede dizendo qual grau o painel abriu, decidir a venda de
+    um T8 com o custo de um T5 seria vender o T8 pelo preco do T5. Ai vale o
+    custo do mais caro: o pior que acontece e o mais barato nao vender agora."""
+
+    maior = {}
+    combinacoes = {}
+
+    for e in carga:
+        maior[e['item']] = max(maior.get(e['item'], 0), e['pago'])
+        combinacoes.setdefault(e['item'], set()).add(e['combinacao'])
+
+    return [maior[e['item']] if len(combinacoes[e['item']]) > 1 else e['pago']
+            for e in carga]
+
+
 def vender(carga, margem=None, taxa=None, de_verdade=True, perto=PERTO_DO_ALVO):
-    """Percorre a carga e vende. <carga> e uma lista de (item, pago, unidades).
+    """Percorre a carga e vende. <carga> e a de carga_pendente().
 
     A CARGA VEM DO HISTORICO, e nao de um inventario lido da tela: o que se
     precisa saber de cada unidade e QUANTO ELA CUSTOU, e isso a tela do jogo nao
@@ -383,8 +493,11 @@ def vender(carga, margem=None, taxa=None, de_verdade=True, perto=PERTO_DO_ALVO):
 
     inicio = time.monotonic()
 
+    incertos = custos_se_incerto(carga)
+
     unidades = 0
     recebido = 0
+    em_ordens = 0
     feitas = 0
     com_erro = []
 
@@ -392,9 +505,9 @@ def vender(carga, margem=None, taxa=None, de_verdade=True, perto=PERTO_DO_ALVO):
     relatar(f'Vendendo {len(carga)} itens no {mercado.MERCADO_NEGRO}')
     relatar('')
 
-    for n, entrada in enumerate(carga, start=1):
+    for n, e in enumerate(carga, start=1):
 
-        item, pago, quantas, qualidade = partes_da_carga(entrada)
+        item = e['item']
 
         if comum.deve_parar():
             relatar(f'>>> parado no item {n} de {len(carga)} <<<')
@@ -418,31 +531,39 @@ def vender(carga, margem=None, taxa=None, de_verdade=True, perto=PERTO_DO_ALVO):
             relatar(f'PARANDO no item {n} - o jogo saiu de primeiro plano.')
             break
 
-        relatar(f'[{n}/{len(carga)}] {item}  {quantas}x, pagos '
-                f'{comum.fmt(pago)} cada')
+        relatar(f'[{n}/{len(carga)}] {item} {e["combinacao"]}  {e["unidades"]}x, '
+                f'pagos {comum.fmt(e["pago"])} cada')
 
         comum.progresso(n, len(carga), f'vendendo {item}')
 
         try:
-            r = vender_item(item, pago, quantas, margem, taxa, de_verdade, perto,
-                            qualidade)
+            r = vender_item(item, e['pago'], e['unidades'], margem, taxa,
+                            de_verdade, perto, e['qualidade'],
+                            combinacao=e['combinacao'],
+                            pago_se_incerto=incertos[n - 1])
 
         except comum.Abortado:
             relatar(f'>>> F12 - parado em "{item}" <<<')
             break
 
-        except Exception as e:
+        except Exception as erro:
             com_erro.append(item)
-            relatar(f'      ERRO neste item - seguindo: {e}')
+            relatar(f'      ERRO neste item - seguindo: {erro}')
             continue
 
         if r['unidades']:
             feitas += 1
             unidades += r['unidades']
             recebido += r['recebido']
+            em_ordens += r['em_ordem']
             comum.placar(recebido=recebido, unidades=unidades)
-            relatar(f'      {r["unidades"]}x por {comum.fmt(r["recebido"])} '
-                    f'({r["modo"]}) - {r["motivo"]}')
+
+            if r['modo'] == 'ordem':
+                relatar(f'      {r["unidades"]}x em ordem, {comum.fmt(r["em_ordem"])} '
+                        f'liquidos se vender - {r["motivo"]}')
+            else:
+                relatar(f'      {r["unidades"]}x por {comum.fmt(r["recebido"])} '
+                        f'liquidos ({r["modo"]}) - {r["motivo"]}')
         else:
             relatar(f'      nada: {r["motivo"]}')
 
@@ -451,6 +572,7 @@ def vender(carga, margem=None, taxa=None, de_verdade=True, perto=PERTO_DO_ALVO):
         'itens_vendidos': feitas,
         'unidades': unidades,
         'recebido': recebido,
+        'em_ordens': em_ordens,
         'com_erro': com_erro,
         'minutos': (time.monotonic() - inicio) / 60,
         'contadores': comum.contadores(),
@@ -458,7 +580,17 @@ def vender(carga, margem=None, taxa=None, de_verdade=True, perto=PERTO_DO_ALVO):
 
     relatar('')
     relatar(f'{feitas} de {len(carga)} itens, {unidades} unidades, '
-            f'{comum.fmt(recebido)} recebidos em {resumo["minutos"]:.0f} min')
+            f'{comum.fmt(recebido)} recebidos'
+            + (f' e {comum.fmt(em_ordens)} em ordens' if em_ordens else '')
+            + f' em {resumo["minutos"]:.0f} min')
+
+    if comum.contador('vendas_abaixo_do_piso'):
+        relatar(f'  {comum.contador("vendas_abaixo_do_piso")} vendas recusadas no '
+                f'dialogo por pagarem abaixo do piso - o resto fica na carga')
+
+    if comum.contador('painel_em_outra_combinacao'):
+        relatar(f'  {comum.contador("painel_em_outra_combinacao")} itens em que o '
+                f'painel abriu outra combinacao - nao vendidos')
 
     do_dia = historico.do_dia()
 
@@ -469,51 +601,66 @@ def vender(carga, margem=None, taxa=None, de_verdade=True, perto=PERTO_DO_ALVO):
     return resumo
 
 
-def carga_do_dia():
-    """O que foi comprado hoje e ainda nao foi vendido: [(item, pago, quantas)].
+def carga_pendente(horas=HORAS_DA_CARGA):
+    """O que foi comprado nas ultimas <horas> e ainda nao foi vendido.
 
-    AGRUPADO POR ITEM E PRECO. Duas compras do mesmo item ao mesmo preco sao a
-    mesma decisao de venda; separa-las so faria abrir o painel duas vezes.
+    Uma lista de {'item', 'combinacao', 'pago', 'unidades', 'qualidade'}, uma
+    entrada por item, combinacao, preco e qualidade: duas compras iguais sao a
+    mesma decisao de venda, e separa-las so faria abrir o painel duas vezes.
 
-    A UNIDADE COMPRADA POR QUALIDADE leva a qualidade junto, num quarto campo:
-    (item, pago, quantas, qualidade). Ela foi comprada para um pedido daquela
-    qualidade, e vende-la como Normal desfaria o negocio. O resto continua com
-    tres campos - e vendido como Normal, como sempre foi."""
+    A COMBINACAO VAI JUNTO. Sem ela, a previsao da venda usava o maior pedido do
+    item em qualquer grau - o de um T8 para prever um T5.
 
-    compras = {}
-    vendas = {}
+    A UNIDADE COMPRADA POR QUALIDADE leva a qualidade junto. Ela foi comprada
+    para um pedido daquela qualidade, e vende-la como Normal desfaria o negocio.
 
-    for o in historico.ler(_meia_noite()):
+    CADA VENDA ABATE AS COMPRAS MAIS ANTIGAS do mesmo item, na ordem em que
+    aconteceram: primeiro as da mesma qualidade, depois qualquer uma. So restringe
+    a combinacao quando a venda sabe qual foi - as antigas gravavam vazio."""
 
-        chave = (o['item'], o['preco'], o.get('qualidade') or 0)
+    lotes = []
+
+    for o in historico.ler(time.time() - horas * 3600):
 
         if o['operacao'] == historico.COMPRA:
-            compras[chave] = compras.get(chave, 0) + o['unidades']
+            lotes.append({'item': o['item'], 'combinacao': o['combinacao'],
+                          'pago': o['preco'], 'unidades': o['unidades'],
+                          'qualidade': o['qualidade']})
+            continue
+
+        falta = o['unidades']
+
+        for mesma_qualidade in (True, False):
+            for lote in lotes:
+
+                if falta <= 0:
+                    break
+
+                if (lote['item'] != o['item'] or lote['unidades'] <= 0
+                        or (o['combinacao'] and lote['combinacao'] != o['combinacao'])
+                        or (mesma_qualidade and lote['qualidade'] != o['qualidade'])):
+                    continue
+
+                abate = min(falta, lote['unidades'])
+                lote['unidades'] -= abate
+                falta -= abate
+
+    carga = {}
+
+    for lote in lotes:
+
+        if lote['unidades'] <= 0:
+            continue
+
+        chave = (lote['item'], lote['combinacao'], lote['pago'],
+                 lote['qualidade'] or 0)
+
+        if chave in carga:
+            carga[chave]['unidades'] += lote['unidades']
         else:
-            vendas[o['item']] = vendas.get(o['item'], 0) + o['unidades']
+            carga[chave] = dict(lote)
 
-    carga = []
-
-    for (item, pago, qualidade), quantas in sorted(compras.items()):
-
-        ja_vendidas = vendas.get(item, 0)
-        sobram = quantas - min(quantas, ja_vendidas)
-
-        vendas[item] = max(0, ja_vendidas - quantas)
-
-        if sobram > 0:
-            carga.append((item, pago, sobram, qualidade) if qualidade
-                         else (item, pago, sobram))
-
-    return carga
-
-
-def partes_da_carga(entrada):
-    """(item, pago, quantas, qualidade) de uma entrada da carga, com ou sem a qualidade."""
-
-    item, pago, quantas, *resto = entrada
-
-    return item, pago, quantas, (resto[0] if resto else None)
+    return [carga[k] for k in sorted(carga)]
 
 
 def _meia_noite():

@@ -99,11 +99,14 @@ def _aceitar(linha, plano, gasto_ate_agora, teto_de_prata, margem, taxa):
 
 
 def comprar_linha(linha, origem, margem, taxa, gasto_ate_agora=0,
-                  teto_de_prata=None, de_verdade=True):
+                  teto_de_prata=None, de_verdade=True, sondar=False):
     """Compra uma combinacao. Devolve o resultado, sem levantar.
 
     O caminho e escolhido pelo Smart Buy: ordem quando ha volume e o item nao e
-    caro, compra na hora no resto. Os dois passam pelas mesmas barreiras."""
+    caro, compra na hora no resto. Os dois passam pelas mesmas barreiras.
+
+    <sondar> espera o livro pela rede mesmo sem pacote recente - o teste da rede
+    na primeira linha. O resultado traz 'pela_rede' quando o livro foi pedido."""
 
     item = linha['item']
     rot = linha['combinacao']
@@ -173,8 +176,12 @@ def comprar_linha(linha, origem, margem, taxa, gasto_ate_agora=0,
         # ofertas desta combinacao, exatas e com quantidade. Antes o bot abria o
         # painel do item clicando no NOME - posicao derivada, nunca medida - e
         # quando ele nao abria a linha parava ali, sem nunca chegar ao Buy.
-        ofertas = escuta.ofertas(origem, item, rot, desde=filtrado_em,
-                                 qualidade=qualidade or None)
+        ofertas = escuta.ofertas(
+            origem, item, rot, desde=filtrado_em, qualidade=qualidade or None,
+            prazo=escuta.ESPERA_SONDA if sondar else escuta.ESPERA,
+            mesmo_calado=sondar)
+
+        saida['pela_rede'] = bool(ofertas)
 
         if ofertas:
             comum.contar('livros_pela_rede')
@@ -408,6 +415,9 @@ def comprar(origem, linhas=None, margem=None, taxa=None, teto_de_prata=None,
 
     inicio = time.monotonic()
 
+    # cliente de pe e calado: a primeira linha testa a rede
+    sondar = escuta.ligada() and not escuta.ativa()
+
     gasto = 0
     previsto = 0
     unidades = 0
@@ -464,7 +474,14 @@ def comprar(origem, linhas=None, margem=None, taxa=None, teto_de_prata=None,
 
         try:
             r = comprar_linha(linha, origem, margem, taxa, gasto,
-                              teto_de_prata, de_verdade)
+                              teto_de_prata, de_verdade, sondar=sondar)
+
+            # o teste e um so por compra: a primeira linha que pediu o livro
+            # diz se a rede responde, e o resto segue com o que ela disse
+            if sondar and 'pela_rede' in r:
+                sondar = False
+                relatar('      a rede respondeu: livros pelos pacotes'
+                        if r['pela_rede'] else escuta.AVISO_SEM_REDE)
 
         except comum.Abortado:
             relatar('')

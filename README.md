@@ -53,9 +53,19 @@ continua abrindo cada item no mercado — o servidor só manda o que o jogo pede
 **exato pelo pacote**, com grau, encantamento, qualidade e quantidade, sem print e sem OCR:
 
 - a leitura não erra dígito nem grau, e a compra vê o livro de ofertas inteiro;
-- o mercado onde você está é descoberto sozinho (troque de zona uma vez depois de abrir o bot);
+- o mercado onde você está é descoberto sozinho (troque de mapa uma vez depois de abrir o jogo);
 - abrir um item na mão também atualiza os preços;
-- se os pacotes pararem de chegar, o bot volta ao OCR sozinho.
+- a leitura e a compra testam a rede no primeiro item; se ela não responder, seguem pelo OCR e
+  dizem isso no Andamento.
+
+O cliente continua rodando quando o bot fecha, e o bot o reaproveita ao abrir: a troca de mapa é
+uma vez por sessão do jogo, e não a cada abertura do bot.
+
+> **ExitLag, VPN e afins impedem a leitura pela rede.** Eles levam a conexão do jogo por um túnel
+> próprio, e o albiondata-client não enxerga os pacotes do Albion na placa de rede: o cliente fica
+> aberto, mas nenhum preço chega. Para ler pela rede, feche o programa de verdade (pelo ícone perto
+> do relógio, não só a janela) e **reabra o jogo** — a conexão que já estava aberta continua pelo
+> túnel. Com ele ligado, o bot funciona pela tela (OCR), só mais devagar.
 
 Ligar, desligar e ver a situação: **Ajustes → Leitura**. O caminho do cliente fica em **Ajustes → Avançado**.
 

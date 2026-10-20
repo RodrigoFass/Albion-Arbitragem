@@ -319,12 +319,24 @@ checar('e mercado que nao existe nao', not api.escolher_mercado('Narnia'))
 p = api.plano_varredura('Thetford', None, False)
 checar('o plano conta as combinacoes do catalogo', p['combinacoes'] > 1500, str(p))
 
-# A REDE LIGADA E CALADA CAIA NO OCR SEM DIZER NADA. Com problema na lista, a
-# leitura nao comeca sem a pessoa confirmar.
-r = api.varrer('Thetford')
-checar('com a rede ligada e sem preco chegando, a leitura avisa que vai pela tela',
-       not r.get('ok') and any('nenhum preço está chegando' in p
-                               for p in r.get('problemas', [])), str(r))
+# A REDE CALADA NAO TRAVA A LEITURA. Ela e o normal logo depois de abrir o jogo,
+# e o aviso que perguntava "tentar mesmo assim?" aparecia toda vez. Agora o
+# primeiro item testa a rede, e o Andamento diz o resultado.
+#
+# NUNCA COM O AMBIENTE DE VERDADE: com o jogo aberto na maquina, nada mais
+# impedia a leitura de comecar - e ela comecava, clicando e digitando no jogo.
+# O ambiente de mentira devolve um problema, e a leitura so devolve a lista.
+_verificar_real, _focar_real = comum.verificar_ambiente, comum.focar_jogo
+comum.verificar_ambiente = lambda exigir_foco: ['jogo fechado (teste)']
+comum.focar_jogo = lambda: False
+
+try:
+    r = api.varrer('Thetford')
+finally:
+    comum.verificar_ambiente, comum.focar_jogo = _verificar_real, _focar_real
+
+checar('a rede ligada e calada nao vira problema que trava a leitura',
+       r.get('problemas') == ['jogo fechado (teste)'] and api._rodando is None, str(r))
 
 
 # ============================================================

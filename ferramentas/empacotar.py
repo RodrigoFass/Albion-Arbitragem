@@ -399,9 +399,18 @@ LEITURA PELA REDE
 Recomendada. Instale o Albion Data Client (github.com/ao-data/albiondata-client,
 o instalador ja traz o Npcap). O bot o abre sozinho mandando os precos SO para
 este computador - nada vai para o projeto publico - e le cada preco exato pelo
-pacote do servidor, sem OCR. Depois de abrir o bot, troque de zona uma vez no
-jogo: e assim que o cliente descobre em que mercado voce esta. A situacao
-aparece em Ajustes > Leitura. Sem o cliente, a leitura e pela tela, com OCR.
+pacote do servidor, sem OCR. Depois de abrir o jogo, troque de mapa uma vez: e
+assim que o cliente descobre em que mercado voce esta. O cliente continua
+rodando quando o bot fecha, entao isso e uma vez por sessao do jogo. A leitura
+e a compra testam a rede no primeiro item e dizem no Andamento se ela nao
+respondeu. A situacao aparece em Ajustes > Leitura. Sem o cliente, a leitura e
+pela tela, com OCR.
+
+EXITLAG, VPN E AFINS IMPEDEM A LEITURA PELA REDE. Eles levam a conexao do jogo
+por um tunel proprio, e o cliente nao enxerga os pacotes do Albion: ele fica
+aberto, mas nenhum preco chega. Para ler pela rede, feche o programa de verdade
+(pelo icone perto do relogio, nao so a janela) e REABRA O JOGO - a conexao que
+ja estava aberta continua pelo tunel. Com ele ligado, o bot funciona pela tela.
 
 COMPRAR POR QUALIDADE
 

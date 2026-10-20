@@ -276,6 +276,31 @@ checar('o livro de compra inteiro vem da rede, sem OCR', _livro == [(900, 4), (9
 
 
 # ============================================================
+grupo('o teste da rede no primeiro item')
+
+# CALADA NAO E QUEBRADA: sem pacote ha 10 minutos e so ninguem ter aberto o
+# mercado. O teste espera o pacote mesmo assim.
+_antes_do_teste = escuta.marca()
+escuta.receber({'Orders': [ordem('T6_MAIN_SWORD', '0007', 880, 2)]})
+escuta._estado['quando'] = None     # calada: nenhum pacote recente
+
+checar('calada, a espera de sempre desiste na hora',
+       escuta.ofertas('Thetford', 'Broadsword', 'T6.0', desde=_antes_do_teste,
+                      prazo=0.2) is None)
+
+checar('e o teste espera o pacote mesmo assim',
+       escuta.ofertas('Thetford', 'Broadsword', 'T6.0', desde=_antes_do_teste,
+                      prazo=0.2, mesmo_calado=True) == [(880, 2)])
+
+checar('o mesmo vale para o preco da varredura',
+       escuta.precos('Thetford', 'Broadsword', 'T6.0', desde=_antes_do_teste,
+                     prazo=0.2, mesmo_calado=True) == (880, None))
+
+checar('e o aviso de quando ela nao responde fala de ExitLag e VPN',
+       'ExitLag' in escuta.AVISO_SEM_REDE and 'VPN' in escuta.AVISO_SEM_REDE)
+
+
+# ============================================================
 grupo('a venda le o pedido que a qualidade atende')
 
 escuta.esquecer()

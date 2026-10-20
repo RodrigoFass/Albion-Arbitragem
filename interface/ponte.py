@@ -376,7 +376,22 @@ class Api:
         itens = self._itens_para_varrer(local, grupo, so_faltando)
         no_negro = local == mercado.MERCADO_NEGRO
         combinacoes = catalogo.combinacoes_de
+
+        # A REDE CALADA NAO TRAVA MAIS A LEITURA. Ela e o normal logo depois de
+        # abrir o jogo - ninguem abriu o mercado ainda - e o aviso que perguntava
+        # "tentar mesmo assim?" aparecia toda vez, com a rede funcionando. Agora
+        # o primeiro item testa a rede (conferidor.ler_item) e o Andamento diz o
+        # resultado. Fica so a linha de quando o cliente nem esta de pe.
+        aviso_rede = None
+
+        if conf.get('rede_ativa') and not escuta.ligada():
+            motivo = self._rede_msg or 'o albiondata-client nao esta rodando'
+            aviso_rede = (f'ATENCAO: leitura pela rede ligada, mas {motivo} - a '
+                          f'leitura vai pela tela (OCR).')
+
         def trabalho():
+            if aviso_rede:
+                comum.relatar(aviso_rede)
             if no_negro:
                 mercado_negro.esquecer_calibragem()
             conferidor.varrer(local, itens, combinacoes=combinacoes,
@@ -393,18 +408,6 @@ class Api:
 
         if pela_rede and pela_rede != local:
             extras.append(f'a rede diz que você está em {pela_rede}, e não em {local}')
-
-        # A REDE LIGADA E CALADA CAIA NO OCR SEM DIZER NADA. O albiondata-client
-        # so manda preco depois de descobrir onde voce esta, e ele descobre na
-        # troca de mapa; ate la a leitura e pela tela, mais lenta e mais sujeita
-        # a erro - e a pessoa achava que estava lendo pela rede.
-        if conf.get('rede_ativa') and not escuta.ativa():
-            extras.append('a leitura pela rede está ligada, mas nenhum preço está '
-                          'chegando por ela - a leitura vai pela tela (OCR), mais '
-                          'lenta e mais sujeita a erro. Se o albiondata-client '
-                          'acabou de abrir, troque de mapa ou relogue no jogo para '
-                          'ele descobrir onde você está; a situação aparece em '
-                          'Ajustes > Leitura')
 
         return self._rodar(trabalho, f'Lendo preços em {local}', forcar, extras)
 

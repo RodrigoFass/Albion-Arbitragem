@@ -1861,6 +1861,80 @@ checar('e a seguinte repoe o encantamento, mesmo sendo o mesmo',
 comum.zerar_contadores()
 
 
+# --- o teste da rede no primeiro item --------------------------------------
+# A REDE CALADA TRAVAVA A LEITURA com um aviso, toda vez, mesmo funcionando:
+# calada e so ninguem ter aberto o mercado nos ultimos minutos. Agora o primeiro
+# item espera o pacote; chegando, segue pela rede, senao pela tela.
+class TelaQueConta(TelaQueFalhaUmaVez):
+    """Conta quantas vezes a tela foi lida - pela rede, nenhuma."""
+
+    def __init__(self):
+        super().__init__()
+        self.falhar = set()
+        self.leituras = 0
+
+    def base(self):
+        self.leituras += 1
+        return 1000
+
+    def ler(self, anterior):
+        self.leituras += 1
+        return (anterior or 1000) + 100
+
+
+def _ler_com_rede(responde):
+
+    estado = {'ativa': False}
+    linhas_do_log = []
+    reais = (conferidor.escuta.ativa, conferidor.escuta.precos, conferidor.relatar,
+             conferidor.SALVAR_FALHAS)
+
+    def precos(local, item, rot, desde, prazo=1.5, mesmo_calado=False):
+        if responde and (mesmo_calado or estado['ativa']):
+            estado['ativa'] = True
+            return 5000 + 100 * len(linhas_do_log), None
+        return None
+
+    conferidor.escuta.ativa = lambda: estado['ativa']
+    conferidor.escuta.precos = precos
+    conferidor.relatar = linhas_do_log.append
+    conferidor.SALVAR_FALHAS = False
+    conferidor.ATUAL.sondar_rede = True
+
+    tela = TelaQueConta()
+
+    try:
+        lidos = conferidor.ler_item('Thetford', 'Broadsword', [(6, 0), (6, 1)], tela)
+    finally:
+        (conferidor.escuta.ativa, conferidor.escuta.precos, conferidor.relatar,
+         conferidor.SALVAR_FALHAS) = reais
+        comum.zerar_contadores()
+
+    return lidos, tela, linhas_do_log
+
+
+_lidos, _tela, _log = _ler_com_rede(responde=True)
+
+checar('rede calada que responde no teste: a leitura inteira vai pela rede',
+       all(p for _, p, _ in _lidos) and _tela.leituras == 0, f'{_lidos} {_tela.leituras}')
+
+checar('e o Andamento diz que a rede respondeu',
+       any('a rede respondeu' in l for l in _log), str(_log))
+
+checar('e o teste e um so', conferidor.ATUAL.sondar_rede is False)
+
+_lidos, _tela, _log = _ler_com_rede(responde=False)
+
+checar('rede que nao responde: o primeiro fica sem preco e o resto vai pela tela',
+       _lidos[0][1] is None and _lidos[1][1] and _tela.leituras >= 2,
+       f'{_lidos} {_tela.leituras}')
+
+checar('e o Andamento fala de ExitLag e VPN',
+       any('ExitLag' in l for l in _log), str(_log))
+
+conferidor.ATUAL.zerar()
+
+
 checar('a ordem e do mais fraco para o mais forte',
        conferidor.COMBINACOES == sorted(conferidor.COMBINACOES),
        str(conferidor.COMBINACOES[:3]))
@@ -4048,6 +4122,50 @@ checar('travado em ordem, sem painel, a linha fica de fora e diz por que',
        and 'compra' not in _loja.passos, f'{_r} {_loja.passos}')
 
 comum.zerar_contadores()
+
+
+# O TESTE DA REDE NA COMPRA: a primeira linha espera o livro mesmo com a rede
+# calada; as seguintes seguem com o que ela disse
+def _compra_com_rede(responde):
+
+    chamadas = []
+    linhas_do_log = []
+    reais = (comprador.escuta.ligada, comprador.escuta.ativa,
+             comprador.escuta.ofertas, comprador.relatar)
+
+    def ofertas(*a, mesmo_calado=False, **k):
+        chamadas.append(mesmo_calado)
+        return [(900, 4)] if responde else None
+
+    comprador.escuta.ligada = lambda: True
+    comprador.escuta.ativa = lambda: False
+    comprador.escuta.ofertas = ofertas
+    comprador.relatar = linhas_do_log.append
+
+    try:
+        _com_loja(_LojaQueAnota({'Broadsword': [(900, 4)]}), lambda: comprador.comprar(
+            'Thetford', [_linha('Broadsword', 'T6.0', 900, 2000, 2),
+                         _linha('Broadsword', 'T6.0', 900, 2000, 2)],
+            margem=0.2, taxa=lucro.TAXA_PADRAO, teto_de_prata=None))
+    finally:
+        (comprador.escuta.ligada, comprador.escuta.ativa,
+         comprador.escuta.ofertas, comprador.relatar) = reais
+
+    return chamadas, linhas_do_log
+
+
+_chamadas, _log = _compra_com_rede(responde=True)
+
+checar('a primeira linha da compra testa a rede, e so ela',
+       _chamadas == [True, False], str(_chamadas))
+
+checar('e o Andamento diz que a rede respondeu',
+       any('a rede respondeu' in l for l in _log), str(_log))
+
+_chamadas, _log = _compra_com_rede(responde=False)
+
+checar('sem resposta, a compra segue pelo painel e o Andamento fala de ExitLag',
+       _chamadas == [True, False] and any('ExitLag' in l for l in _log), str(_log))
 
 # --- o piso ----------------------------------------------------------------
 checar('com o "perto" padrao, o piso e 95% do alvo',

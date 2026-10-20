@@ -111,6 +111,12 @@ PADRAO = {
     # texto embaixo. Lembrar transforma a tela em "confirme onde voce esta".
     'ultimo_mercado': '',
 
+    # AS COMBINACOES QUE A LEITURA DE PRECOS PERCORRE. None = todas as que o
+    # catalogo tem; uma lista ('T5.2', 'T6.0', ...) deixa so essas. E um filtro
+    # da LEITURA, marcado na propria tela de Ler precos: pular de uma vez o que
+    # voce nao vai comprar hoje, sem mexer nas quantidades da tela Itens.
+    'combinacoes_lidas': None,
+
     # --- como o bot compra ------------------------------------------------
     # SMART BUY, SO ORDEM, OU SO NA HORA.
     #

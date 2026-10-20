@@ -70,6 +70,12 @@
     const faltando = h('input', { type: 'checkbox' });
     faltando.addEventListener('change', () => calcularPlano());
 
+    // AS COMBINACOES DA LEITURA: o botao diz quantas estao marcadas e abre as
+    // caixas embaixo. Desmarcar pula aquela combinacao em todos os itens.
+    let combos = null;    // {rotulos, marcadas}
+    const combosBotao = h('button', { type: 'button', class: 'entrada botao-combinacoes', 'aria-expanded': 'false', onclick: () => alternarCombos() }, '…');
+    const combosPainel = h('div', { class: 'combinacoes oculto' });
+
     // a situacao da rede, no canto do cartao: clicar leva aos ajustes dela
     const redeTexto = h('span', {});
     const redePonto = h('span', { class: 'ponto' });
@@ -86,12 +92,53 @@
       cartao('O que ler',
         h('div', { class: 'linha' },
           campo('Grupo', grupoSel),
+          campo('Combinações', combosBotao),
           h('label', { class: 'marcar', style: { alignSelf: 'flex-end', height: '36px' } }, faltando, 'Só o que ainda não foi lido')),
+        combosPainel,
         h('div', { class: 'plano separado' },
           h('div', {}, tempo, h('div', { class: 'nota' }, 'estimado')),
           h('div', { style: { flex: 1 } }, detalhe, explica),
           comecar),
         h('div', { class: 'linha', style: { marginTop: '8px' } }, trazer, apagar)));
+
+    function desenharCombos() {
+      const marcadas = new Set(combos.marcadas);
+      const graus = {};
+      for (const r of combos.rotulos) {
+        const g = r.slice(1).split('.')[0];
+        (graus[g] = graus[g] || []).push(r);
+      }
+
+      trocar(combosPainel,
+        h('div', { class: 'linha' },
+          h('button', { type: 'button', class: 'botao discreto pequeno', onclick: () => marcarCombos(combos.rotulos) }, 'Marcar todas'),
+          h('button', { type: 'button', class: 'botao discreto pequeno', onclick: () => marcarCombos([]) }, 'Desmarcar todas'),
+          h('span', { class: 'nota' }, 'Vale só para a leitura. Para tirar uma combinação da compra também, zere a quantidade dela na tela Itens.')),
+        Object.entries(graus).map(([g, rotulos]) => h('div', { class: 'combinacoes-grau', role: 'group', 'aria-label': `Grau ${g}` },
+          h('strong', {}, `Grau ${g}`),
+          rotulos.map((r) => {
+            const caixa = h('input', { type: 'checkbox', 'data-rotulo': r });
+            caixa.checked = marcadas.has(r);
+            caixa.addEventListener('change', () => marcarCombos(
+              combos.rotulos.filter((x) => (x === r ? caixa.checked : marcadas.has(x)))));
+            return h('label', { class: 'marcar' }, caixa, r.slice(1));
+          }))));
+
+      const n = combos.marcadas.length;
+      const total = combos.rotulos.length;
+      combosBotao.textContent = n === total ? `Todas (${total})` : `${n} de ${total}`;
+    }
+
+    async function marcarCombos(lista) {
+      combos = await api('marcar_combinacoes_para_ler', lista);
+      desenharCombos();
+      calcularPlano();
+    }
+
+    function alternarCombos() {
+      const aberto = !combosPainel.classList.toggle('oculto');
+      combosBotao.setAttribute('aria-expanded', aberto ? 'true' : 'false');
+    }
 
     function corDaIdade(m) {
       if (!m.quantos) return '';
@@ -231,6 +278,9 @@
       dados = await api('mercados');
       if (escolhido === null) escolhido = dados.escolhido;
       pintarRede(dados);
+
+      combos = await api('combinacoes_para_ler');
+      desenharCombos();
 
       const atual = grupoSel.value;
       trocar(grupoSel, h('option', { value: '' }, 'Todos os grupos'),

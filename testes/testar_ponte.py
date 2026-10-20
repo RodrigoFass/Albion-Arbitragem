@@ -319,6 +319,32 @@ checar('e mercado que nao existe nao', not api.escolher_mercado('Narnia'))
 p = api.plano_varredura('Thetford', None, False)
 checar('o plano conta as combinacoes do catalogo', p['combinacoes'] > 1500, str(p))
 
+# AS COMBINACOES DA LEITURA: desmarcar pula aquela combinacao em todos os itens
+c = api.combinacoes_para_ler()
+checar('de fabrica, as 13 combinacoes estao marcadas',
+       len(c['rotulos']) == 13 and c['marcadas'] == c['rotulos'] and vira_json(c), str(c))
+
+c = api.marcar_combinacoes_para_ler(['T7.0', 'T6.0', 'T9.9'])
+checar('marcar algumas guarda so essas, na ordem do jogo e sem rotulo invalido',
+       c['marcadas'] == ['T6.0', 'T7.0'] and ajustes.atuais()['combinacoes_lidas'] == ['T6.0', 'T7.0'],
+       str(c))
+
+p2 = api.plano_varredura('Thetford', None, False)
+_esperadas = sum(1 for i in catalogo.para_varrer(None) for g, e in catalogo.combinacoes_de(i)
+                 if (g, e) in ((6, 0), (7, 0)))
+checar('e o plano conta so as marcadas', p2['combinacoes'] == _esperadas and 0 < p2['combinacoes'] < p['combinacoes'],
+       f"{p2['combinacoes']} de {p['combinacoes']}, esperadas {_esperadas}")
+
+c = api.marcar_combinacoes_para_ler([])
+p3 = api.plano_varredura('Thetford', None, False)
+checar('nenhuma marcada: nada a ler, e o aviso diz por que',
+       p3['combinacoes'] == 0 and 'Nenhuma combinação marcada' in (p3.get('aviso') or ''), str(p3))
+
+c = api.marcar_combinacoes_para_ler(c['rotulos'])
+checar('todas marcadas de novo e o mesmo que sem filtro',
+       ajustes.atuais()['combinacoes_lidas'] is None
+       and api.plano_varredura('Thetford', None, False)['combinacoes'] == p['combinacoes'])
+
 # A REDE CALADA NAO TRAVA A LEITURA. Ela e o normal logo depois de abrir o jogo,
 # e o aviso que perguntava "tentar mesmo assim?" aparecia toda vez. Agora o
 # primeiro item testa a rede, e o Andamento diz o resultado.

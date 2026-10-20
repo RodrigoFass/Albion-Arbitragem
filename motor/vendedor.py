@@ -213,7 +213,7 @@ def _dialogo_confere(esperado, minimo=None, primeira=True):
         _guardar_falha('dialogo_ausente', [texto])
         return False, None, 'o dialogo de confirmacao nao esta na tela'
 
-    recebido = comum.valor_do_dialogo(texto)
+    recebido = comum.preco_do_dialogo(texto)
 
     if recebido is None:
         comum.contar('dialogo_de_venda_ilegivel')

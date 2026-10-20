@@ -4256,6 +4256,43 @@ checar('sem preco legivel, nada',
 checar('preco partido pelo OCR sai menor, e nao maior',
        (comum.valor_do_dialogo('por 125 000 de prata') or 0) < 125_000)
 
+# O DIALOGO DE COMPRA DE VERDADE, como o jogo escreve. Juntando todos os digitos
+# o bot lia 1.255.988 - o "1" de "Buy 1 pieces" colado no preco - e clicava em
+# "No" em toda compra na hora.
+_dialogo_do_jogo = ("Buy 1 pieces of Grandmaster's Brawler Gloves for 255,988 Silver?\n"
+                    "WARNING: YOU CANNOT EQUIP THIS ITEM")
+
+checar('o preco do dialogo de compra do jogo e o de verdade',
+       comum.preco_do_dialogo(_dialogo_do_jogo) == 255_988,
+       str(comum.preco_do_dialogo(_dialogo_do_jogo)))
+
+checar('em portugues tambem',
+       comum.preco_do_dialogo('Quer comprar 1 unidades de Espada Larga por 25.000 '
+                              'de prata?') == 25_000)
+
+checar('e no dialogo de venda',
+       comum.preco_do_dialogo('Sell 1 pieces of Great Hammer for 19,592 Silver?') == 19_592)
+
+checar('espaco que o OCR enfia no meio do preco nao o parte',
+       comum.preco_do_dialogo('Buy 1 pieces of Bow for 255, 988 Silver?') == 255_988)
+
+checar('sem "for ... Silver" legivel, vale o maior numero escrito',
+       comum.preco_do_dialogo('Buy 1 pieces of Bow f0r 25,000 Si1ver?') == 25_000)
+
+# e a compra aceita esse dialogo, em vez de recusar
+_reais_dialogo = (comum.esperar_estavel, comum.ler_texto)
+comum.esperar_estavel = lambda *a, **k: True
+comum.ler_texto = lambda regiao: _dialogo_do_jogo
+
+try:
+    _situacao, _cobrado, _ = compra.conferir_dialogo(
+        255_988, lambda v: (v <= 260_000, 'passa do teto'))
+finally:
+    comum.esperar_estavel, comum.ler_texto = _reais_dialogo
+
+checar('a compra confirma o dialogo do jogo em vez de clicar em "No"',
+       _situacao == 'ok' and _cobrado == 255_988, f'{_situacao} {_cobrado}')
+
 # --- vender na hora, unidade por unidade ----------------------------------
 
 

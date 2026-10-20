@@ -1520,6 +1520,34 @@ def valor_do_dialogo(texto):
     return max(valores) if valores else None
 
 
+# O preco no texto do dialogo: entre o "for"/"por" e o "Silver"/"prata".
+_PRECO_NO_DIALOGO = re.compile(
+    r'\b(?:for|por)\s+(\d[\d.,\s]*?)\s*(?:silver|de\s+prata|prata)', re.IGNORECASE)
+
+
+def preco_do_dialogo(texto):
+    """O preco de um dialogo de confirmacao, de COMPRA ou de VENDA, ou None.
+
+    "Buy 1 pieces of Grandmaster's Brawler Gloves for 255,988 Silver?" - o
+    numero_valido juntava todos os digitos do texto e lia 1.255.988: o "1" da
+    quantidade colado no preco. Na compra isso passava do teto, e o bot clicava
+    em "No" em toda compra na hora.
+
+    Aqui o preco e o que esta entre "for"/"por" e "Silver"/"prata", e so ele -
+    espacos que o OCR enfie no meio do numero ("255, 988") nao o partem. Sem
+    esse trecho no texto, vale o maior numero escrito (valor_do_dialogo)."""
+
+    achado = _PRECO_NO_DIALOGO.search(texto or '')
+
+    if achado:
+        digitos = ''.join(c for c in achado.group(1) if c.isdigit())
+
+        if digitos and PRECO_MIN <= int(digitos) <= PRECO_MAX:
+            return int(digitos)
+
+    return valor_do_dialogo(texto)
+
+
 def tinta_na_borda(bruta):
     """True quando ha traco colado na primeira coluna do recorte.
 

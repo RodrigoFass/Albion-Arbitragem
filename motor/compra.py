@@ -446,7 +446,9 @@ def conferir_dialogo(esperado, aceitar=None):
         _guardar_falha('dialogo_ausente', ['esperado: ' + str(esperado), texto])
         return 'ausente', None, 'o dialogo de confirmacao nao esta na tela'
 
-    cobrado = comum.numero_valido(texto)
+    # O PRECO, E SO ELE: juntar todos os digitos colava o "1" de "Buy 1 pieces"
+    # no preco, lia 1.255.988 no lugar de 255.988 e recusava toda compra
+    cobrado = comum.preco_do_dialogo(texto)
 
     if cobrado is None:
         comum.contar('dialogo_ilegivel')

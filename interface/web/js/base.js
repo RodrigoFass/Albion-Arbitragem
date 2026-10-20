@@ -408,8 +408,9 @@ function textoDaRede(s) {
   }
   if (s.mensagem) return [s.mensagem, 'aviso'];
   if (s.cliente === 'rodando') {
-    return ['Cliente aberto, esperando o primeiro pacote. No jogo, troque de zona uma vez '
-      + '(é assim que o cliente descobre onde você está) e abra um item no mercado.', ''];
+    return ['Cliente aberto, esperando o primeiro pacote. No jogo, troque de mapa uma vez '
+      + '(é assim que o cliente descobre onde você está) e abra um item no mercado. '
+      + 'Com ExitLag, VPN ou afins ligados nenhum pacote chega: feche o programa e reabra o jogo.', ''];
   }
   return ['Ligando…', ''];
 }

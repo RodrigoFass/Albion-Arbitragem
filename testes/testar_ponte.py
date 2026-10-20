@@ -319,12 +319,50 @@ checar('e mercado que nao existe nao', not api.escolher_mercado('Narnia'))
 p = api.plano_varredura('Thetford', None, False)
 checar('o plano conta as combinacoes do catalogo', p['combinacoes'] > 1500, str(p))
 
-# A REDE LIGADA E CALADA CAIA NO OCR SEM DIZER NADA. Com problema na lista, a
-# leitura nao comeca sem a pessoa confirmar.
-r = api.varrer('Thetford')
-checar('com a rede ligada e sem preco chegando, a leitura avisa que vai pela tela',
-       not r.get('ok') and any('nenhum preço está chegando' in p
-                               for p in r.get('problemas', [])), str(r))
+# AS COMBINACOES DA LEITURA: desmarcar pula aquela combinacao em todos os itens
+c = api.combinacoes_para_ler()
+checar('de fabrica, as 13 combinacoes estao marcadas',
+       len(c['rotulos']) == 13 and c['marcadas'] == c['rotulos'] and vira_json(c), str(c))
+
+c = api.marcar_combinacoes_para_ler(['T7.0', 'T6.0', 'T9.9'])
+checar('marcar algumas guarda so essas, na ordem do jogo e sem rotulo invalido',
+       c['marcadas'] == ['T6.0', 'T7.0'] and ajustes.atuais()['combinacoes_lidas'] == ['T6.0', 'T7.0'],
+       str(c))
+
+p2 = api.plano_varredura('Thetford', None, False)
+_esperadas = sum(1 for i in catalogo.para_varrer(None) for g, e in catalogo.combinacoes_de(i)
+                 if (g, e) in ((6, 0), (7, 0)))
+checar('e o plano conta so as marcadas', p2['combinacoes'] == _esperadas and 0 < p2['combinacoes'] < p['combinacoes'],
+       f"{p2['combinacoes']} de {p['combinacoes']}, esperadas {_esperadas}")
+
+c = api.marcar_combinacoes_para_ler([])
+p3 = api.plano_varredura('Thetford', None, False)
+checar('nenhuma marcada: nada a ler, e o aviso diz por que',
+       p3['combinacoes'] == 0 and 'Nenhuma combinação marcada' in (p3.get('aviso') or ''), str(p3))
+
+c = api.marcar_combinacoes_para_ler(c['rotulos'])
+checar('todas marcadas de novo e o mesmo que sem filtro',
+       ajustes.atuais()['combinacoes_lidas'] is None
+       and api.plano_varredura('Thetford', None, False)['combinacoes'] == p['combinacoes'])
+
+# A REDE CALADA NAO TRAVA A LEITURA. Ela e o normal logo depois de abrir o jogo,
+# e o aviso que perguntava "tentar mesmo assim?" aparecia toda vez. Agora o
+# primeiro item testa a rede, e o Andamento diz o resultado.
+#
+# NUNCA COM O AMBIENTE DE VERDADE: com o jogo aberto na maquina, nada mais
+# impedia a leitura de comecar - e ela comecava, clicando e digitando no jogo.
+# O ambiente de mentira devolve um problema, e a leitura so devolve a lista.
+_verificar_real, _focar_real = comum.verificar_ambiente, comum.focar_jogo
+comum.verificar_ambiente = lambda exigir_foco: ['jogo fechado (teste)']
+comum.focar_jogo = lambda: False
+
+try:
+    r = api.varrer('Thetford')
+finally:
+    comum.verificar_ambiente, comum.focar_jogo = _verificar_real, _focar_real
+
+checar('a rede ligada e calada nao vira problema que trava a leitura',
+       r.get('problemas') == ['jogo fechado (teste)'] and api._rodando is None, str(r))
 
 
 # ============================================================

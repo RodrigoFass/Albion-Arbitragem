@@ -99,11 +99,14 @@ def _aceitar(linha, plano, gasto_ate_agora, teto_de_prata, margem, taxa):
 
 
 def comprar_linha(linha, origem, margem, taxa, gasto_ate_agora=0,
-                  teto_de_prata=None, de_verdade=True):
+                  teto_de_prata=None, de_verdade=True, sondar=False):
     """Compra uma combinacao. Devolve o resultado, sem levantar.
 
     O caminho e escolhido pelo Smart Buy: ordem quando ha volume e o item nao e
-    caro, compra na hora no resto. Os dois passam pelas mesmas barreiras."""
+    caro, compra na hora no resto. Os dois passam pelas mesmas barreiras.
+
+    <sondar> espera o livro pela rede mesmo sem pacote recente - o teste da rede
+    na primeira linha. O resultado traz 'pela_rede' quando o livro foi pedido."""
 
     item = linha['item']
     rot = linha['combinacao']
@@ -149,9 +152,17 @@ def comprar_linha(linha, origem, margem, taxa, gasto_ate_agora=0,
     painel = False
 
     try:
-        aplicados = [filtros.encantamento(ench), filtros.grau(grau)]
+        aplicados = [filtros.encantamento(ench)]
+
+        # O LIVRO DE AGORA, e nao o da varredura. A lista foi montada com precos
+        # de antes, e o mercado nao esperou. A marca vem ANTES DA ULTIMA TROCA DE
+        # FILTRO: e ela que faz o jogo pedir as ofertas desta combinacao, e so
+        # vale pacote que chegou depois dela.
+        filtrado_em = escuta.marca()
+        aplicados.append(filtros.grau(grau))
 
         if qualidade:
+            filtrado_em = escuta.marca()
             aplicados.append(filtros.qualidade(qualidade))
 
         # FILTRO QUE NAO ENTROU E COMPRA DE OUTRA COMBINACAO: o livro na tela
@@ -161,26 +172,35 @@ def comprar_linha(linha, origem, margem, taxa, gasto_ate_agora=0,
             comum.contar('linhas_sem_filtro')
             return saida
 
-        # O LIVRO DE AGORA, e nao o da varredura. A lista foi montada com precos
-        # de antes, e o mercado nao esperou.
-        aberto_em = escuta.marca()
+        # PELA REDE, SEM PAINEL. A lista filtrada ja fez o servidor mandar as
+        # ofertas desta combinacao, exatas e com quantidade. Antes o bot abria o
+        # painel do item clicando no NOME - posicao derivada, nunca medida - e
+        # quando ele nao abria a linha parava ali, sem nunca chegar ao Buy.
+        ofertas = escuta.ofertas(
+            origem, item, rot, desde=filtrado_em, qualidade=qualidade or None,
+            prazo=escuta.ESPERA_SONDA if sondar else escuta.ESPERA,
+            mesmo_calado=sondar)
 
-        if not compra.abrir_painel():
-            saida['motivo'] = 'o painel do item nao abriu'
-            comum.contar('itens_sem_painel')
+        saida['pela_rede'] = bool(ofertas)
+
+        if ofertas:
+            comum.contar('livros_pela_rede')
+
+        elif qualidade:
+            # so a rede diz a qualidade de cada oferta: sem o pacote, nao compra
+            saida['motivo'] = 'o livro dessa qualidade nao chegou pela rede'
             return saida
 
-        painel = True
-
-        if qualidade:
-            # so a rede diz a qualidade de cada oferta: sem o pacote, nao compra
-            ofertas = escuta.ofertas(origem, item, rot, desde=aberto_em,
-                                     qualidade=qualidade)
-            if not ofertas:
-                saida['motivo'] = 'o livro dessa qualidade nao chegou pela rede'
-                return saida
         else:
-            ofertas = _ler_livro(origem, item, rot, aberto_em)
+            # SEM A REDE o livro sai da tela, e ele esta no painel do item
+            if not compra.abrir_painel():
+                saida['motivo'] = ('o painel do item nao abriu - e sem a leitura '
+                                   'pela rede o livro so sai dele')
+                comum.contar('itens_sem_painel')
+                return saida
+
+            painel = True
+            ofertas = compra.ler_livro()
 
         if not ofertas:
             saida['motivo'] = ('ninguem vendendo' if compra.livro_vazio()
@@ -214,6 +234,25 @@ def comprar_linha(linha, origem, margem, taxa, gasto_ate_agora=0,
             comum.contar('linhas_sem_plano')
             return saida
 
+        # A ORDEM PRECISA DO PAINEL - e la que ficam o "Pedido de compra", a
+        # quantidade e o preco. A compra na hora nao: ela sai da propria lista.
+        # Sem o painel, a linha que ia por ordem e comprada na hora, unidade por
+        # unidade e com o dialogo conferido - a ordem so poupava cliques.
+        if modo == 'ordem' and not painel:
+
+            if compra.abrir_painel():
+                painel = True
+
+            elif travado == 'ordem':
+                saida['motivo'] = ('travado em ordem, e o painel do item nao '
+                                   'abriu para criar a ordem')
+                comum.contar('itens_sem_painel')
+                return saida
+
+            else:
+                comum.contar('ordem_virou_na_hora')
+                modo = 'na hora'
+
         saida['modo'] = modo
 
         if not de_verdade:
@@ -225,6 +264,13 @@ def comprar_linha(linha, origem, margem, taxa, gasto_ate_agora=0,
         if modo == 'ordem':
             _por_ordem(saida, plano, linha, origem)
         else:
+            # A COMPRA NA HORA COMECA DA LISTA: o primeiro clique e o Buy da
+            # linha da oferta. Com o painel do item aberto por cima, esse clique
+            # caia no livro de ofertas do painel e nada acontecia.
+            if painel:
+                compra.fechar_painel()
+                painel = False
+
             _na_hora(saida, plano, linha, origem, margem, taxa,
                      gasto_ate_agora, teto_de_prata)
 
@@ -239,21 +285,6 @@ def comprar_linha(linha, origem, margem, taxa, gasto_ate_agora=0,
         filtros.limpar()
 
     return saida
-
-
-def _ler_livro(origem, item, rot, desde):
-    """As ofertas do painel aberto: pela rede quando chegam, senao pelo OCR.
-
-    PELA REDE O LIVRO VEM INTEIRO E EXATO - preco e quantidade de cada oferta,
-    como o servidor mandou, em vez de cinco linhas lidas da tela."""
-
-    ofertas = escuta.ofertas(origem, item, rot, desde=desde)
-
-    if ofertas:
-        comum.contar('livros_pela_rede')
-        return ofertas
-
-    return compra.ler_livro()
 
 
 def _cabem(ofertas, sobra):
@@ -384,6 +415,9 @@ def comprar(origem, linhas=None, margem=None, taxa=None, teto_de_prata=None,
 
     inicio = time.monotonic()
 
+    # cliente de pe e calado: a primeira linha testa a rede
+    sondar = escuta.ligada() and not escuta.ativa()
+
     gasto = 0
     previsto = 0
     unidades = 0
@@ -440,7 +474,14 @@ def comprar(origem, linhas=None, margem=None, taxa=None, teto_de_prata=None,
 
         try:
             r = comprar_linha(linha, origem, margem, taxa, gasto,
-                              teto_de_prata, de_verdade)
+                              teto_de_prata, de_verdade, sondar=sondar)
+
+            # o teste e um so por compra: a primeira linha que pediu o livro
+            # diz se a rede responde, e o resto segue com o que ela disse
+            if sondar and 'pela_rede' in r:
+                sondar = False
+                relatar('      a rede respondeu: livros pelos pacotes'
+                        if r['pela_rede'] else escuta.AVISO_SEM_REDE)
 
         except comum.Abortado:
             relatar('')

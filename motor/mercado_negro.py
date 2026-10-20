@@ -226,24 +226,42 @@ def abrir(item, nome_de_busca=None):
         comum.contar('abertos_pela_busca')
 
     if not abrir_painel():
+        # quem chama nao passa pelo limpar_selecao quando o painel nao abre - e
+        # a categoria do menu estragaria o item seguinte do mesmo jeito
+        _desfazer_menu()
         return False, 'o painel de venda nao abriu'
 
     return True, ''
 
 
-def limpar_selecao():
-    """Fecha o painel. E so isso.
+def _desfazer_menu():
+    """Tira a categoria que o menu deixou fixada, se o item veio por ele.
 
-    NADA DE BOTAO DE RESETAR AQUI. O da direita zera os filtros de grau e
-    encantamento DA BARRA DE CIMA, e no Mercado Negro esses filtros nao sao
-    usados: os dropdowns que interessam ficam dentro do painel de Pedido de
-    Venda e vao embora com ele. Clicar ali era um clique por item sem efeito
-    nenhum sobre a proxima leitura.
+    O MENU FIXA A CATEGORIA, E ELA FICA. Depois de "Frost Staff" pelo menu, a
+    busca de "Great Frost Staff" acontecia dentro dela, a lista vinha vazia e o
+    painel "nao abria" - e o mesmo no item seguinte. O botao de resetar da
+    direita desfaz a categoria, como na cidade."""
+
+    global _veio_do_menu
+
+    if _veio_do_menu:
+        filtros.limpar()
+        _veio_do_menu = False
+
+
+def limpar_selecao():
+    """Fecha o painel - e desfaz a categoria, se o item veio pelo menu.
+
+    FORA DISSO, NADA DE BOTAO DE RESETAR AQUI. Os filtros de grau e
+    encantamento da barra de cima nao sao usados no Mercado Negro: os dropdowns
+    que interessam ficam dentro do painel de Pedido de Venda e vao embora com
+    ele. Clicar ali em todo item seria um clique sem efeito sobre a leitura.
 
     A busca tambem nao precisa ser zerada aqui - o proximo item comeca clicando
     no reset da busca antes de digitar, que e a sequencia do bot_atualizar."""
 
     fechar_painel()
+    _desfazer_menu()
 
 #endregion
 
@@ -321,14 +339,37 @@ def _inicio(item, ench):
 
     # A TABELA PRIMEIRO. Com encantamento a lista e truncada no Grau 4, porque
     # item encantado so existe a partir dali - por isso o max().
-    base = graus_base().get(item)
+    base = _base_da_tabela(item)
 
     if base is not None:
         return max(base, 4) if ench >= 1 else base
 
-    # Sem tabela, o palpite mais barato: erra por deslocamento constante, e a
-    # primeira leitura do rotulo corrige.
+    # Sem tabela, o palpite mais barato - que escolher_grau confere lendo a
+    # primeira opcao antes de clicar em qualquer outra (ver _descobrir_inicio).
     return 4 if ench >= 1 else 1
+
+
+def _base_da_tabela(item):
+    """O grau base do item na tabela, pelo nome do catalogo OU pelo do menu.
+
+    A TABELA USA O NOME DO MENU. "Greathammer" no catalogo e "Great Hammer" na
+    tabela, e o mesmo vale para as capas, a Bag, a Satchel e o Black Monk Stave:
+    nove itens que nunca achavam o grau base. O bot supunha que a lista do Great
+    Hammer comecava no Grau 1; ela comeca no 4, e pedir o T6 clicava a sexta
+    opcao de uma lista de cinco - fora dela."""
+
+    tabela = graus_base()
+
+    base = tabela.get(item)
+
+    return base if base is not None else tabela.get(categorias.no_menu(item))
+
+
+def _sabe_o_inicio(item, ench):
+    """True se o comeco da lista vem da tabela ou ja foi lido nesta sessao."""
+
+    return ((item, ench >= 1) in _inicio_conhecido
+            or _base_da_tabela(item) is not None)
 
 
 def _posicao_do_grau(item, grau, ench):
@@ -342,16 +383,73 @@ def _posicao_do_grau(item, grau, ench):
     return {'x': cd.VND_BARRA_TIER['x'], 'y': cd.opcao_venda(indice)}
 
 
+def _clicar_opcao_de_grau(indice):
+    """Abre o dropdown de grau e escolhe a opcao <indice> (1 = primeira)."""
+
+    alvo = {'x': cd.VND_BARRA_TIER['x'], 'y': cd.opcao_venda(indice)}
+
+    filtros.trocar(
+        lambda: filtros.escolher(cd.VND_BARRA_TIER, alvo,
+                                 _deteccao(cd.VND_BARRA_TIER), afastar=False),
+        regiao=_regiao_do_preco())
+
+
+def _ler_grau_insistindo():
+    """O rotulo do grau, com uma segunda olhada se a primeira nao der."""
+
+    lido = ler_grau()
+
+    if lido is None:
+        time.sleep(ESPERA_ROTULO)
+        lido = ler_grau()
+
+    return lido
+
+
+def _descobrir_inicio(item, ench):
+    """Escolhe a PRIMEIRA opcao e le o rotulo: e ali que a lista comeca.
+
+    A primeira opcao existe em toda lista, entao este clique nunca cai fora
+    dela - ao contrario de um palpite errado, que pedia a sexta opcao de uma
+    lista de cinco e clicava no painel embaixo. Devolve o grau lido, ou None
+    se o rotulo nao der para ler (ai vale o palpite de sempre)."""
+
+    _clicar_opcao_de_grau(1)
+
+    lido = _ler_grau_insistindo()
+
+    if lido is None:
+        return None
+
+    _inicio_conhecido[(item, ench >= 1)] = lido
+
+    # o que se aprende sem encantamento vale para a lista encantada, que e a
+    # mesma truncada no 4
+    if ench == 0:
+        _inicio_conhecido.setdefault((item, True), max(lido, 4))
+
+    comum.contar('inicio_do_grau_lido')
+
+    return lido
+
+
 def escolher_grau(item, grau, ench):
     """Seleciona o grau e CONFERE pelo rotulo, corrigindo se errar.
 
     Devolve 'ok', 'ilegivel' ou 'nao_conseguiu'.
 
     A correcao e o coracao deste modulo. Errar aqui nao da erro: da o preco de
-    outro grau gravado no lugar do certo. Como o erro e um deslocamento
-    constante - a lista comecou N graus acima do que se supunha - a diferenca
-    entre o que se pediu e o que apareceu E a calibragem, e uma correcao basta.
+    outro grau gravado no lugar do certo.
+
+    SEM SABER ONDE A LISTA COMECA, O BOT LE ANTES DE CLICAR: escolhe a primeira
+    opcao e le o rotulo (_descobrir_inicio). E quando o grau lido nao bate com o
+    pedido, faz o mesmo - a primeira opcao diz o comeco exato da lista, mesmo
+    que o clique anterior tenha caido fora dela. A conta pela diferenca so
+    sobra para quando o rotulo da primeira opcao nao der para ler.
     """
+
+    if not _sabe_o_inicio(item, ench):
+        _descobrir_inicio(item, ench)
 
     for tentativa in range(1 + CORRECOES_DE_GRAU):
 
@@ -360,17 +458,10 @@ def escolher_grau(item, grau, ench):
         if alvo is None:
             return 'nao_conseguiu'
 
-        filtros.trocar(
-            lambda: filtros.escolher(cd.VND_BARRA_TIER, alvo,
-                                     _deteccao(cd.VND_BARRA_TIER),
-                                     afastar=False),
-            regiao=_regiao_do_preco())
+        indice = grau - _inicio(item, ench) + 1
+        _clicar_opcao_de_grau(indice)
 
-        lido = ler_grau()
-
-        if lido is None:
-            time.sleep(ESPERA_ROTULO)
-            lido = ler_grau()
+        lido = _ler_grau_insistindo()
 
         if lido is None:
             # ROTULO ILEGIVEL nao e evidencia de erro - so falta de evidencia.
@@ -381,6 +472,14 @@ def escolher_grau(item, grau, ench):
 
         if lido == grau:
             return 'ok'
+
+        comum.contar('grau_corrigido')
+
+        # O COMECO EXATO, lido na primeira opcao. Vale mais que a conta abaixo:
+        # se o clique caiu fora da lista, o rotulo continua no grau de antes e
+        # a diferenca nao quer dizer nada.
+        if _descobrir_inicio(item, ench) is not None:
+            continue
 
         # A DIFERENCA E A CALIBRAGEM, e o sinal importa.
         #
@@ -399,8 +498,6 @@ def escolher_grau(item, grau, ench):
         if ench == 0:
             _inicio_conhecido.setdefault(
                 (item, True), max(_inicio_conhecido[(item, False)], 4))
-
-        comum.contar('grau_corrigido')
 
     comum.contar('grau_contradiz')
 

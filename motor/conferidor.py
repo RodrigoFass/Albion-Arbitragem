@@ -230,6 +230,7 @@ class _Execucao:
 
     def zerar(self):
         self.veio_do_menu = False
+        self.sondar_rede = False     # testar a rede na proxima combinacao
         self.bordas_salvas = 0
         self.onde = ''
         self.item = ''
@@ -515,6 +516,17 @@ def ler_item(local, item, combinacoes, tela=None):
             # existem para ancorar o OCR.
             pela_rede = escuta.ativa()
 
+            # O TESTE DA REDE. Cliente de pe e nenhum pacote recente e o normal
+            # logo depois de abrir o jogo: ninguem abriu o mercado ainda. A
+            # primeira combinacao espera o pacote mesmo assim; chegando, a
+            # leitura inteira segue pela rede. Antes, isso virava um aviso que
+            # travava a leitura toda vez - e a leitura ia pela tela mesmo com a
+            # rede funcionando.
+            sondando = not pela_rede and ATUAL.sondar_rede
+
+            if sondando:
+                pela_rede = True
+
             if anterior is None and not pela_rede:
                 anterior = tela.base()
 
@@ -576,7 +588,16 @@ def ler_item(local, item, combinacoes, tela=None):
             # repescagem do fim tenta de novo, e varias faltas seguidas fazem a
             # escuta se dar por calada: dai em diante e OCR, com as ancoras.
             if pela_rede:
-                rede = escuta.precos(local, item, rotulo, desde=trocou_em)
+                rede = escuta.precos(
+                    local, item, rotulo, desde=trocou_em,
+                    prazo=escuta.ESPERA_SONDA if sondando else escuta.ESPERA,
+                    mesmo_calado=sondando)
+
+                # o teste e um so por leitura: falhou, o resto vai pela tela
+                if sondando:
+                    ATUAL.sondar_rede = False
+                    relatar('      a rede respondeu: lendo pelos pacotes'
+                            if rede is not None else escuta.AVISO_SEM_REDE)
 
                 if rede is not None:
                     preco, outro = rede
@@ -782,6 +803,9 @@ def varrer(local, itens, combinacoes=None, salvar_a_cada=10,
     # item ja deixa a tela como o proximo precisa.
     limpar_a_tela(local, tela)
     ATUAL.zerar()
+
+    # cliente de pe e calado: o primeiro item testa a rede - ver ler_item
+    ATUAL.sondar_rede = escuta.ligada() and not escuta.ativa()
 
     inicio = time.monotonic()
     total = 0

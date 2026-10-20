@@ -139,6 +139,20 @@ def rodar():
         checar('os sete mercados', visivel('.mercado') == 7, str(visivel('.mercado')))
         checar('a situacao da rede numa pilula', visivel('.pilula-rede') == 1)
 
+        # as combinacoes da leitura: o botao abre as caixas, e desmarcar uma
+        # muda o resumo do botao
+        checar('as combinacoes comecam todas marcadas',
+               (js("document.querySelector('.botao-combinacoes').textContent") or '').startswith('Todas'))
+        js("document.querySelector('.botao-combinacoes').click()", 0.5)
+        checar('o botao abre as 13 caixas', visivel('.combinacoes input[type=checkbox]') == 13,
+               str(visivel('.combinacoes input[type=checkbox]')))
+        js("document.querySelector('.combinacoes input[data-rotulo=\"T5.2\"]').click()", 1.0)
+        checar('desmarcar uma muda o resumo', js("document.querySelector('.botao-combinacoes').textContent") == '12 de 13',
+               str(js("document.querySelector('.botao-combinacoes').textContent")))
+        checar('e fica guardado', 'T5.2' not in (api.combinacoes_para_ler()['marcadas']))
+        api.marcar_combinacoes_para_ler(api.combinacoes_para_ler()['rotulos'])
+        js("app.ir('operacao')", 1.0)
+
         js("document.querySelector('[data-passo=comprar]').click()", 2.0)
         linhas = visivel('[data-tela=operacao] .tabela tbody tr')
         checar('Comprar: a lista com os precos lidos', linhas > 0, f'{linhas} linhas')

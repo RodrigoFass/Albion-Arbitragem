@@ -230,6 +230,15 @@ class Api:
         escuta.parar_cliente()
         escuta.parar_servidor()
 
+    def _encerrar_rede(self):
+        """Ao fechar o programa: fecha o receptor e DEIXA O CLIENTE RODANDO.
+
+        O albiondata-client so manda preco depois de ver uma troca de mapa.
+        Fechado junto com o bot, cada abertura pedia outra troca de mapa; vivo,
+        ele continua sabendo onde voce esta, e o bot o adota ao abrir."""
+
+        escuta.parar_servidor()
+
     def rede(self):
         """Como esta a leitura pela rede, para a interface mostrar."""
 
@@ -320,6 +329,47 @@ class Api:
         ajustes.salvar()
         return True
 
+    def combinacoes_para_ler(self):
+        """As 13 combinacoes e as que estao marcadas para a leitura de precos."""
+
+        marcadas = ajustes.atuais().get('combinacoes_lidas')
+
+        return {'rotulos': list(mercado.ROTULOS),
+                'marcadas': (list(mercado.ROTULOS) if marcadas is None
+                             else [r for r in mercado.ROTULOS if r in marcadas])}
+
+    def marcar_combinacoes_para_ler(self, rotulos):
+        """Guarda quais combinacoes a leitura percorre. Todas marcadas = sem filtro."""
+
+        escolhidas = set(rotulos or [])
+        validas = [r for r in mercado.ROTULOS if r in escolhidas]
+
+        ajustes.definir('combinacoes_lidas',
+                        None if len(validas) == len(mercado.ROTULOS) else validas)
+        ajustes.salvar()
+
+        return self.combinacoes_para_ler()
+
+    def _combinacoes_para_ler(self):
+        """combinacoes_de(item) do catalogo, so com as marcadas na tela.
+
+        O catalogo ja tira o que tem quantidade zero; isto tira o que voce
+        desmarcou na leitura - o que nao vai comprar hoje, sem mexer nas
+        quantidades."""
+
+        marcadas = ajustes.atuais().get('combinacoes_lidas')
+
+        if marcadas is None:
+            return catalogo.combinacoes_de
+
+        marcadas = set(marcadas)
+
+        def combinacoes(item, mapa=None):
+            return [c for c in catalogo.combinacoes_de(item, mapa)
+                    if mercado.rotulo(*c) in marcadas]
+
+        return combinacoes
+
     def _itens_para_varrer(self, local, grupo, so_faltando):
 
         itens = catalogo.para_varrer(grupo or None)
@@ -327,7 +377,12 @@ class Api:
         if so_faltando:
             itens = conferidor.falta_conferir(itens, local)
 
-        return itens
+        # ITEM SEM NENHUMA COMBINACAO MARCADA NEM E ABERTO: abrir para nao ler
+        # nada seria uma busca e um painel a toa por item
+        combinacoes = self._combinacoes_para_ler()
+        mapa = catalogo._mapa_de_grupos()
+
+        return [i for i in itens if combinacoes(i, mapa)]
 
     def plano_varredura(self, local, grupo=None, so_faltando=False):
         """O que vai acontecer, antes de acontecer: itens, combinacoes, tempo."""
@@ -342,12 +397,15 @@ class Api:
                  'tinha': mercado.quantidade(local)}
 
         if not itens:
-            saida.update(combinacoes=0, minutos=0,
-                         aviso='Nada a ler com esses filtros — veja a tela Itens.')
+            aviso = ('Nenhuma combinação marcada para ler — marque alguma em '
+                     '"Combinações".' if ajustes.atuais().get('combinacoes_lidas') == []
+                     else 'Nada a ler com esses filtros — veja a tela Itens.')
+            saida.update(combinacoes=0, minutos=0, aviso=aviso)
             return saida
 
         mapa = catalogo._mapa_de_grupos()
-        saida['combinacoes'] = sum(len(catalogo.combinacoes_de(i, mapa)) for i in itens)
+        combinacoes = self._combinacoes_para_ler()
+        saida['combinacoes'] = sum(len(combinacoes(i, mapa)) for i in itens)
         # pela rede a leitura e mais rapida, e o tempo previsto acompanha
         saida['minutos'] = (saida['combinacoes']
                             * catalogo.segundos_por_combinacao(escuta.ativa()) / 60)
@@ -366,8 +424,23 @@ class Api:
         conf = ajustes.atuais()
         itens = self._itens_para_varrer(local, grupo, so_faltando)
         no_negro = local == mercado.MERCADO_NEGRO
-        combinacoes = catalogo.combinacoes_de
+        combinacoes = self._combinacoes_para_ler()
+
+        # A REDE CALADA NAO TRAVA MAIS A LEITURA. Ela e o normal logo depois de
+        # abrir o jogo - ninguem abriu o mercado ainda - e o aviso que perguntava
+        # "tentar mesmo assim?" aparecia toda vez, com a rede funcionando. Agora
+        # o primeiro item testa a rede (conferidor.ler_item) e o Andamento diz o
+        # resultado. Fica so a linha de quando o cliente nem esta de pe.
+        aviso_rede = None
+
+        if conf.get('rede_ativa') and not escuta.ligada():
+            motivo = self._rede_msg or 'o albiondata-client nao esta rodando'
+            aviso_rede = (f'ATENCAO: leitura pela rede ligada, mas {motivo} - a '
+                          f'leitura vai pela tela (OCR).')
+
         def trabalho():
+            if aviso_rede:
+                comum.relatar(aviso_rede)
             if no_negro:
                 mercado_negro.esquecer_calibragem()
             conferidor.varrer(local, itens, combinacoes=combinacoes,
@@ -384,18 +457,6 @@ class Api:
 
         if pela_rede and pela_rede != local:
             extras.append(f'a rede diz que você está em {pela_rede}, e não em {local}')
-
-        # A REDE LIGADA E CALADA CAIA NO OCR SEM DIZER NADA. O albiondata-client
-        # so manda preco depois de descobrir onde voce esta, e ele descobre na
-        # troca de mapa; ate la a leitura e pela tela, mais lenta e mais sujeita
-        # a erro - e a pessoa achava que estava lendo pela rede.
-        if conf.get('rede_ativa') and not escuta.ativa():
-            extras.append('a leitura pela rede está ligada, mas nenhum preço está '
-                          'chegando por ela - a leitura vai pela tela (OCR), mais '
-                          'lenta e mais sujeita a erro. Se o albiondata-client '
-                          'acabou de abrir, troque de mapa ou relogue no jogo para '
-                          'ele descobrir onde você está; a situação aparece em '
-                          'Ajustes > Leitura')
 
         return self._rodar(trabalho, f'Lendo preços em {local}', forcar, extras)
 

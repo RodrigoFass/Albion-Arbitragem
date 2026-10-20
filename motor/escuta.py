@@ -69,6 +69,19 @@ ESPERA = 1.5
 # por ela - a leitura vai direto para o OCR, sem perder tempo por combinacao.
 SILENCIO = 600
 
+# Quanto esperar no TESTE DA REDE: o primeiro item de uma leitura ou de uma
+# compra com o cliente de pe e nenhum pacote recente. Calada nao quer dizer
+# quebrada - so que ninguem abriu o mercado nos ultimos minutos.
+ESPERA_SONDA = 3.0
+
+# O que o Andamento diz quando o teste da rede falha. EXITLAG E VPN PRIMEIRO:
+# foi o que impediu a leitura pela rede numa maquina por dias, com o cliente
+# aberto e o aviso pedindo uma troca de mapa que nao resolvia nada.
+AVISO_SEM_REDE = ('ATENCAO: a rede nao respondeu no primeiro item - seguindo pela '
+                  'tela (OCR). ExitLag, VPN ou outro programa que desvia o '
+                  'trafego do jogo impedem a leitura pela rede; feche-o e reabra '
+                  'o jogo. Se o albiondata-client acabou de abrir, troque de mapa.')
+
 # Onde o instalador do albiondata-client costuma pôr o programa.
 CAMINHOS_COMUNS = (
     r'C:\Program Files\Albion Data Client\albiondata-client.exe',
@@ -251,6 +264,16 @@ def ativa():
             and time.time() - _estado['quando'] < SILENCIO)
 
 
+def ligada():
+    """True se o receptor e o cliente estao de pe: PODE chegar preco.
+
+    Diferente de ativa(), que diz se chegou ha pouco. Ligada e calada e o normal
+    logo depois de abrir o jogo - e e quando vale testar a rede no primeiro
+    item em vez de desistir dela."""
+
+    return _servidor is not None and _cliente_situacao == 'rodando'
+
+
 # Pacotes esperados que nao chegaram, seguidos. Passando disto a escuta se da por
 # calada - o cliente caiu, o jogo trocou de mercado - e a leitura volta ao OCR
 # ate o proximo pacote chegar.
@@ -323,10 +346,12 @@ def _livros_do_item(local, item, rot, desde):
                 and l.get('seq', 0) > desde}
 
 
-def _esperar(funcao, prazo):
-    """Chama <funcao> ate ela devolver algo, ou o prazo acabar."""
+def _esperar(funcao, prazo, mesmo_calado=False):
+    """Chama <funcao> ate ela devolver algo, ou o prazo acabar.
 
-    if not ativa():
+    <mesmo_calado> espera mesmo sem pacote recente: e o teste da rede."""
+
+    if not ativa() and not mesmo_calado:
         return None
 
     fim = time.monotonic() + prazo
@@ -345,7 +370,7 @@ def _esperar(funcao, prazo):
         time.sleep(0.05)
 
 
-def precos(local, item, rot, desde, prazo=ESPERA):
+def precos(local, item, rot, desde, prazo=ESPERA, mesmo_calado=False):
     """(preco, outro) de uma combinacao pela rede, ou None para cair no OCR.
 
     O MESMO PAR QUE A TELA DARIA: na cidade, a oferta mais barata; no Mercado
@@ -366,7 +391,7 @@ def precos(local, item, rot, desde, prazo=ESPERA):
         ofertas = [o for o in ofertas if o]
         return (min(ofertas), None) if ofertas else None
 
-    resposta = _esperar(tentar, prazo)
+    resposta = _esperar(tentar, prazo, mesmo_calado)
 
     if resposta:
         _chegou()
@@ -374,7 +399,8 @@ def precos(local, item, rot, desde, prazo=ESPERA):
     return resposta
 
 
-def ofertas(local, item, rot, desde, prazo=ESPERA, qualidade=None):
+def ofertas(local, item, rot, desde, prazo=ESPERA, qualidade=None,
+            mesmo_calado=False):
     """O livro de venda inteiro, [(preco, quantidade)] do mais barato, ou None.
 
     <qualidade> None junta todas - e o que a lista de compra sem filtro mostra."""
@@ -389,7 +415,7 @@ def ofertas(local, item, rot, desde, prazo=ESPERA, qualidade=None):
 
         return sorted(juntas) if juntas else None
 
-    return _esperar(tentar, prazo)
+    return _esperar(tentar, prazo, mesmo_calado)
 
 
 def ultimo_do_item(local, item, desde, prazo=ESPERA, qualidade=1):
@@ -577,15 +603,58 @@ def cliente_aberto():
     return NOME_DO_CLIENTE.lower() in saida.lower()
 
 
+def _destino(porta=None):
+    """O endereco para onde o cliente deste bot manda os precos."""
+
+    return f'http://127.0.0.1:{porta or _porta or PORTA_PADRAO}'
+
+
+def cliente_desta_porta(porta=None):
+    """O PID de um albiondata-client que ja manda para este bot, ou None.
+
+    E O CLIENTE QUE O BOT DEIXOU RODANDO da ultima vez - ver iniciar_cliente.
+    Reconhecido pela linha de comando, que traz o endereco local."""
+
+    destino = _destino(porta)
+
+    try:
+        saida = subprocess.run(
+            ['powershell', '-NoProfile', '-Command',
+             f"Get-CimInstance Win32_Process -Filter \"Name='{NOME_DO_CLIENTE}'\" | "
+             "ForEach-Object { \"$($_.ProcessId)|$($_.CommandLine)\" }"],
+            capture_output=True, text=True, timeout=20,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)).stdout
+    except Exception:
+        return None
+
+    for linha in saida.splitlines():
+        pid, _, comando = linha.partition('|')
+        if destino in comando and pid.strip().isdigit():
+            return int(pid)
+
+    return None
+
+
+# O cliente que ja estava rodando, mandando para este bot, quando o bot abriu.
+_adotado = None
+
+
 def iniciar_cliente(configurado='', porta=None):
     """Abre o albiondata-client mandando os precos SO para este bot.
 
     -i troca o destino publico pelo endereco local: nada sai do computador. O
     projeto publico nao recebe nada desta maquina.
 
+    O CLIENTE QUE JA MANDA PARA ESTE BOT E REAPROVEITADO. O albiondata-client so
+    manda preco depois de ver uma troca de mapa no jogo - e ali que ele descobre
+    onde voce esta. Fechado junto com o bot e aberto de novo com ele, cada
+    abertura do bot pedia outra troca de mapa, e ate la a leitura caia no OCR.
+    Por isso o bot deixa o cliente rodando ao fechar (ver ponte._encerrar_rede)
+    e o adota ao abrir.
+
     Devolve (ok, mensagem)."""
 
-    global _processo, _cliente_situacao
+    global _processo, _adotado, _cliente_situacao
 
     if _processo is not None and _processo.poll() is None:
         _cliente_situacao = 'rodando'
@@ -598,14 +667,19 @@ def iniciar_cliente(configurado='', porta=None):
         return False, ('albiondata-client nao encontrado. Instale pelo site do '
                        'projeto e informe o caminho em Ajustes.')
 
+    _adotado = cliente_desta_porta(porta)
+
+    if _adotado is not None:
+        _cliente_situacao = 'rodando'
+        return True, ''
+
     if cliente_aberto():
         _cliente_situacao = 'outro_aberto'
         return False, ('Ja ha um albiondata-client aberto, com as opcoes dele. '
                        'Feche-o para o bot abrir um que manda os precos so para '
                        'este computador.')
 
-    argumentos = [caminho, '-i', f'http://127.0.0.1:{porta or _porta or PORTA_PADRAO}',
-                  '-minimize']
+    argumentos = [caminho, '-i', _destino(porta), '-minimize']
 
     try:
         _processo = subprocess.Popen(
@@ -629,9 +703,12 @@ def iniciar_cliente(configurado='', porta=None):
 
 
 def parar_cliente():
-    """Fecha o cliente - so o que este bot abriu."""
+    """Fecha o cliente - so o deste bot: o que ele abriu ou o que ele adotou.
 
-    global _processo, _cliente_situacao
+    E para desligar a leitura pela rede ou trocar a porta. Fechar o bot NAO
+    passa por aqui: o cliente fica rodando para nao perder o mapa."""
+
+    global _processo, _adotado, _cliente_situacao
 
     if _processo is not None and _processo.poll() is None:
         try:
@@ -640,7 +717,16 @@ def parar_cliente():
         except Exception:
             pass
 
+    if _adotado is not None:
+        try:
+            subprocess.run(['taskkill', '/PID', str(_adotado), '/F'],
+                           capture_output=True, timeout=10,
+                           creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        except Exception:
+            pass
+
     _processo = None
+    _adotado = None
     _cliente_situacao = 'desligado'
 
 #endregion

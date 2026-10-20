@@ -534,6 +534,7 @@ class Menu:
         self.sob_o_mouse = []
         self.cliques = []
         self.deslocar = {}      # familia -> quantas linhas o jogo empurrou
+        self.eventos = []       # 'busca limpa', 'menu abre', 'menu fecha'
 
     def _visivel(self):
         """{regiao: (texto, caminho)} do que estaria na tela agora.
@@ -603,6 +604,11 @@ class Menu:
                                     categorias.MENU_BOTAO['y']):
             self.aberto = not self.aberto
             self.sob_o_mouse = []
+            self.eventos.append('menu abre' if self.aberto else 'menu fecha')
+            return
+
+        if pos == cd.CMP_RESET:
+            self.eventos.append('busca limpa')
             return
 
         self.cliques.append((pos['x'], pos['y']))
@@ -611,16 +617,17 @@ class Menu:
 def _com_menu(tela, acao):
     """Roda <acao> com a tela de mentira no lugar da de verdade."""
 
-    reais = (comum.ler_texto, comum.clicar, comum.apontar)
+    reais = (comum.ler_texto, comum.clicar, comum.apontar, comum.esperar_estavel)
 
     comum.ler_texto = tela.ler
     comum.clicar = tela.clicar
     comum.apontar = tela.apontar
+    comum.esperar_estavel = lambda *a, **k: True
 
     try:
         return acao()
     finally:
-        comum.ler_texto, comum.clicar, comum.apontar = reais
+        comum.ler_texto, comum.clicar, comum.apontar, comum.esperar_estavel = reais
         comum.zerar_contadores()
 
 
@@ -635,6 +642,11 @@ checar('e clica UMA vez, no lugar certo', _tela.cliques == [(1085, 405)],
 
 checar('o menu ficou aberto no caminho certo', _tela.sob_o_mouse == [1, 2],
        str(_tela.sob_o_mouse))
+
+# A BUSCA DO ITEM ANTERIOR FICAVA NA CAIXA, e o menu filtrava por cima dela:
+# "Arcane Staff" depois de "Hoarfrost Staff" dava lista vazia
+checar('a busca do item anterior e limpa antes de abrir o menu',
+       _tela.eventos[:2] == ['busca limpa', 'menu abre'], str(_tela.eventos))
 
 # --- dois niveis so ---------------------------------------------------------
 _tela = Menu()
@@ -671,6 +683,10 @@ checar('uma arma nova no meio da familia NAO passa batido', not _res, _motivo)
 checar('e o motivo aponta o nivel', 'nivel 3' in _motivo, _motivo)
 
 checar('e nada foi clicado', not _tela.cliques, str(_tela.cliques))
+
+# MENU QUE FALHOU NO MEIO FICAVA ABERTO, e os cliques do item seguinte caiam nele
+checar('e o menu que falhou no meio e fechado', not _tela.aberto
+       and _tela.eventos[-1] == 'menu fecha', str(_tela.eventos))
 
 # --- item sem caminho -------------------------------------------------------
 _tela = Menu()
@@ -714,6 +730,9 @@ checar('submenu que nao abre para a navegacao', not _res)
 checar('e diz de qual submenu se trata', 'Weapons' in _motivo, _motivo)
 
 checar('e nao clica no escuro', not _tela.cliques, str(_tela.cliques))
+
+checar('e nao deixa o menu aberto por cima da lista', not _tela.aberto,
+       str(_tela.eventos))
 
 # --- os 121 itens do catalogo inicial, um por um ----------------------------
 _nao_navegaram = []
@@ -1842,6 +1861,80 @@ checar('e a seguinte repoe o encantamento, mesmo sendo o mesmo',
 comum.zerar_contadores()
 
 
+# --- o teste da rede no primeiro item --------------------------------------
+# A REDE CALADA TRAVAVA A LEITURA com um aviso, toda vez, mesmo funcionando:
+# calada e so ninguem ter aberto o mercado nos ultimos minutos. Agora o primeiro
+# item espera o pacote; chegando, segue pela rede, senao pela tela.
+class TelaQueConta(TelaQueFalhaUmaVez):
+    """Conta quantas vezes a tela foi lida - pela rede, nenhuma."""
+
+    def __init__(self):
+        super().__init__()
+        self.falhar = set()
+        self.leituras = 0
+
+    def base(self):
+        self.leituras += 1
+        return 1000
+
+    def ler(self, anterior):
+        self.leituras += 1
+        return (anterior or 1000) + 100
+
+
+def _ler_com_rede(responde):
+
+    estado = {'ativa': False}
+    linhas_do_log = []
+    reais = (conferidor.escuta.ativa, conferidor.escuta.precos, conferidor.relatar,
+             conferidor.SALVAR_FALHAS)
+
+    def precos(local, item, rot, desde, prazo=1.5, mesmo_calado=False):
+        if responde and (mesmo_calado or estado['ativa']):
+            estado['ativa'] = True
+            return 5000 + 100 * len(linhas_do_log), None
+        return None
+
+    conferidor.escuta.ativa = lambda: estado['ativa']
+    conferidor.escuta.precos = precos
+    conferidor.relatar = linhas_do_log.append
+    conferidor.SALVAR_FALHAS = False
+    conferidor.ATUAL.sondar_rede = True
+
+    tela = TelaQueConta()
+
+    try:
+        lidos = conferidor.ler_item('Thetford', 'Broadsword', [(6, 0), (6, 1)], tela)
+    finally:
+        (conferidor.escuta.ativa, conferidor.escuta.precos, conferidor.relatar,
+         conferidor.SALVAR_FALHAS) = reais
+        comum.zerar_contadores()
+
+    return lidos, tela, linhas_do_log
+
+
+_lidos, _tela, _log = _ler_com_rede(responde=True)
+
+checar('rede calada que responde no teste: a leitura inteira vai pela rede',
+       all(p for _, p, _ in _lidos) and _tela.leituras == 0, f'{_lidos} {_tela.leituras}')
+
+checar('e o Andamento diz que a rede respondeu',
+       any('a rede respondeu' in l for l in _log), str(_log))
+
+checar('e o teste e um so', conferidor.ATUAL.sondar_rede is False)
+
+_lidos, _tela, _log = _ler_com_rede(responde=False)
+
+checar('rede que nao responde: o primeiro fica sem preco e o resto vai pela tela',
+       _lidos[0][1] is None and _lidos[1][1] and _tela.leituras >= 2,
+       f'{_lidos} {_tela.leituras}')
+
+checar('e o Andamento fala de ExitLag e VPN',
+       any('ExitLag' in l for l in _log), str(_log))
+
+conferidor.ATUAL.zerar()
+
+
 checar('a ordem e do mais fraco para o mais forte',
        conferidor.COMBINACOES == sorted(conferidor.COMBINACOES),
        str(conferidor.COMBINACOES[:3]))
@@ -2924,6 +3017,65 @@ _r = _com_painel(_p, lambda: mercado_negro.escolher_grau(_fora, 8, 0))
 checar('a combinacao seguinte ja acerta de primeira',
        _r == 'ok' and _p.cliques == 1, f'{_r}, {_p.cliques} cliques')
 
+# --- o clique que cai FORA da lista ----------------------------------------
+# A LISTA ACABA NO GRAU 8. Supondo que a do Great Hammer comecava no 1, o bot
+# pedia a sexta opcao de uma lista de cinco: o clique caia no painel embaixo, o
+# rotulo continuava no grau de antes, e a conta pela diferenca nao saia do
+# lugar. Na varredura: o Great Hammer inteiro sem preco, e o bot "perdido".
+class PainelComFim(Painel):
+    """O painel de verdade: a lista acaba no 8, e o painel abre no primeiro grau."""
+
+    def __init__(self, base):
+        super().__init__(base)
+        self.grau = self._inicio()
+        self.opcoes = []
+
+    def escolher(self, barra, opcao, deteccao=None, afastar=True):
+        indice = (opcao['y'] - cd.VND_DROPDOWN_TOPO) // cd.VND_DROPDOWN_PASSO + 1
+
+        if barra['x'] == cd.VND_BARRA_TIER['x']:
+            self.opcoes.append(indice)
+            if self._inicio() + indice - 1 > 8:
+                self.cliques += 1
+                return              # fora da lista: nada muda
+
+        super().escolher(barra, opcao, deteccao, afastar)
+
+
+checar('a tabela de graus acha o item pelo nome do menu (Greathammer = Great Hammer)',
+       mercado_negro._base_da_tabela('Greathammer') == 4
+       and mercado_negro._base_da_tabela('Demon Cape') == 4
+       and mercado_negro._base_da_tabela('Bag') == 2)
+
+mercado_negro.esquecer_calibragem()
+_p = PainelComFim(base=4)
+_r = _com_painel(_p, lambda: mercado_negro.escolher_grau('Greathammer', 6, 0))
+
+checar('o Great Hammer acerta o T6 de primeira, na terceira opcao',
+       _r == 'ok' and _p.grau == 6 and _p.opcoes == [3], f'{_r} {_p.grau} {_p.opcoes}')
+
+# a tabela errada para um item: o clique cai fora, e a primeira opcao corrige
+mercado_negro.esquecer_calibragem()
+mercado_negro.graus_base()['Bloodletter'] = 1
+
+try:
+    _p = PainelComFim(base=4)
+    _r = _com_painel(_p, lambda: mercado_negro.escolher_grau('Bloodletter', 6, 0))
+finally:
+    del mercado_negro.graus_base()['Bloodletter']
+
+checar('clique fora da lista: le a primeira opcao e acerta o grau',
+       _r == 'ok' and _p.grau == 6 and 1 in _p.opcoes, f'{_r} {_p.grau} {_p.opcoes}')
+
+# item fora da tabela: le a primeira opcao ANTES, e nunca clica alem do fim
+mercado_negro.esquecer_calibragem()
+_p = PainelComFim(base=4)
+_r = _com_painel(_p, lambda: mercado_negro.escolher_grau('Bloodletter', 8, 0))
+
+checar('item sem tabela le o comeco antes e nunca clica fora da lista',
+       _r == 'ok' and _p.grau == 8 and _p.opcoes[0] == 1 and max(_p.opcoes) <= 5,
+       f'{_r} {_p.grau} {_p.opcoes}')
+
 # --- com encantamento a lista e truncada no grau 4 -------------------------
 mercado_negro.esquecer_calibragem()
 _p = Painel(base=1)
@@ -3108,16 +3260,21 @@ checar('e nao digita nada', _t.digitado is None, str(_t.digitado))
 checar('mas clica em Vender do mesmo jeito',
        (cd.VND_VENDER['x'], cd.VND_VENDER['y']) in _t.cliques)
 
-# TERMINAR UM ITEM E FECHAR O PAINEL, E MAIS NADA.
+# TERMINAR UM ITEM E FECHAR O PAINEL - e, se ele veio pelo menu, desfazer a
+# categoria que o menu fixou.
 #
 # A busca nao precisa ser zerada aqui: o proximo item comeca clicando no reset da
 # busca antes de digitar, que e a sequencia do bot_atualizar.
 #
-# E o botao de resetar da direita nao tem o que fazer nesta tela. Ele zera os
-# filtros de grau e encantamento DA BARRA DE CIMA, e no Mercado Negro esses
-# filtros nao sao usados - os dropdowns que interessam ficam dentro do painel de
-# Pedido de Venda e vao embora junto com ele.
-for _item in ('Cursed Staff', 'Broadsword'):
+# O botao de resetar da direita nao tem o que fazer depois de um item da busca:
+# os filtros de grau e encantamento da barra de cima nao sao usados nesta tela.
+# Mas DEPOIS DO MENU ELE E OBRIGATORIO: a categoria ficava fixada, e o item
+# seguinte, pela busca, era procurado dentro dela. Nos registros de uma
+# varredura: "Frost Staff" pelo menu, e "Great Frost Staff" e "Glacial Staff"
+# logo depois com "o painel de venda nao abriu".
+_limpar = (cd.CMP_LIMPAR_FILTROS['x'], cd.CMP_LIMPAR_FILTROS['y'])
+
+for _item, _pelo_menu in (('Cursed Staff', True), ('Broadsword', False)):
 
     _t = Tela()
     _com_tela(_t, lambda i=_item: (mercado_negro.abrir(i),
@@ -3127,9 +3284,37 @@ for _item in ('Cursed Staff', 'Broadsword'):
            (cd.VND_FECHAR['x'], cd.VND_FECHAR['y']) in _t.cliques,
            str(_t.cliques))
 
-    checar(f'e nao toca no botao de resetar da direita ({_item})',
-           (cd.CMP_LIMPAR_FILTROS['x'], cd.CMP_LIMPAR_FILTROS['y'])
-           not in _t.cliques, str(_t.cliques))
+    if _pelo_menu:
+        checar('e o item do menu desfaz a categoria depois de fechar o painel',
+               _limpar in _t.cliques
+               and _t.cliques.index(_limpar)
+               > _t.cliques.index((cd.VND_FECHAR['x'], cd.VND_FECHAR['y'])),
+               str(_t.cliques))
+    else:
+        checar('e o item da busca nao toca no botao de resetar da direita',
+               _limpar not in _t.cliques, str(_t.cliques))
+
+# o painel que nao abre: quem chama nao passa pelo limpar_selecao, e a categoria
+# estragaria o item seguinte do mesmo jeito
+_real_painel = mercado_negro.abrir_painel
+mercado_negro.abrir_painel = lambda: False
+
+try:
+    _t = Tela()
+    _ok, _ = _com_tela(_t, lambda: mercado_negro.abrir('Cursed Staff'))
+finally:
+    mercado_negro.abrir_painel = _real_painel
+
+checar('item do menu cujo painel nao abriu tambem desfaz a categoria',
+       not _ok and _limpar in _t.cliques, str(_t.cliques))
+
+# e depois de desfeita, o item seguinte da busca nao desfaz de novo a toa
+_t = Tela()
+_com_tela(_t, lambda: (mercado_negro.abrir('Broadsword'),
+                       mercado_negro.limpar_selecao()))
+
+checar('a categoria e desfeita uma vez so', _limpar not in _t.cliques,
+       str(_t.cliques))
 
 mercado_negro.esquecer_calibragem()
 
@@ -3902,6 +4087,144 @@ _r, _reg = _com_loja(_loja_sf, lambda: comprador.comprar_linha(
 checar('filtro que nao entrou nao vira compra',
        _r['unidades'] == 0 and not _reg and not _loja_sf.compradas
        and 'filtro' in _r['motivo'], str(_r))
+
+
+# --- COMPRAR NA HORA SAI DA LISTA ------------------------------------------
+# O bot abria o painel do item clicando no NOME - posicao derivada, nunca
+# medida - e com ele aberto clicava no Buy da linha, que fica debaixo do livro de
+# ofertas do painel. No jogo: "nada: o painel do item nao abriu", e nenhum Buy.
+from motor import ajustes   # noqa: E402
+
+
+class _LojaQueAnota(Loja):
+    """A loja, anotando a ordem dos passos: painel, compra, ordem."""
+
+    def __init__(self, livros, painel_abre=True):
+        super().__init__(livros)
+        self.passos = []
+        self.painel_abre = painel_abre
+
+    def abrir_painel(self):
+        self.passos.append('abre painel')
+        super().abrir_painel()
+        return self.painel_abre
+
+    def fechar_painel(self):
+        self.passos.append('fecha painel')
+
+    def comprar_uma(self, esperado, aceitar=None):
+        self.passos.append('compra')
+        return super().comprar_uma(esperado, aceitar)
+
+    def criar_ordem(self, plano, tolerancia=0.01):
+        self.passos.append('ordem')
+        return super().criar_ordem(plano, tolerancia)
+
+
+def _comprar_pela_rede(loja, quantidade, livro_da_rede, modo_de_compra='smart'):
+    """comprar_linha com o livro chegando pela rede (ou nao, com None)."""
+
+    real_ofertas = comprador.escuta.ofertas
+    real_modo = ajustes.atuais()['modo_de_compra']
+
+    comprador.escuta.ofertas = lambda *a, **k: livro_da_rede
+    ajustes.definir('modo_de_compra', modo_de_compra)
+
+    try:
+        return _com_loja(loja, lambda: comprador.comprar_linha(
+            _linha('Broadsword', 'T6.0', 900, 2000, quantidade), 'Thetford', 0.2,
+            lucro.TAXA_PADRAO))
+    finally:
+        comprador.escuta.ofertas = real_ofertas
+        ajustes.definir('modo_de_compra', real_modo)
+
+
+# sem a rede: o livro sai do painel, e o painel FECHA antes do primeiro Buy
+_loja = _LojaQueAnota({'Broadsword': [(900, 2)]})
+_r, _ = _comprar_pela_rede(_loja, 2, None)
+
+checar('sem a rede, o painel fecha antes do Buy da lista',
+       _r['unidades'] == 2 and _loja.passos[:3] == ['abre painel', 'fecha painel', 'compra'],
+       f'{_r} {_loja.passos}')
+
+# com a rede: nenhum painel - o livro ja veio quando a lista foi filtrada
+_loja = _LojaQueAnota({'Broadsword': [(900, 2)]}, painel_abre=False)
+_r, _ = _comprar_pela_rede(_loja, 2, [(900, 2)])
+
+checar('com o livro pela rede, compra na hora sem abrir painel nenhum',
+       _r['unidades'] == 2 and 'abre painel' not in _loja.passos,
+       f'{_r} {_loja.passos}')
+
+# ordem com o painel abrindo: cria a ordem nele
+_loja = _LojaQueAnota({'Broadsword': [(900, 10)]})
+_r, _ = _comprar_pela_rede(_loja, 10, [(900, 10)])
+
+checar('a ordem abre o painel e e criada nele',
+       _r['modo'] == 'ordem' and _loja.passos[:2] == ['abre painel', 'ordem'],
+       f'{_r} {_loja.passos}')
+
+# ordem com o painel que nao abre: compra na hora, unidade por unidade
+_loja = _LojaQueAnota({'Broadsword': [(900, 10)]}, painel_abre=False)
+_r, _ = _comprar_pela_rede(_loja, 10, [(900, 10)])
+
+checar('sem o painel, a linha que ia por ordem e comprada na hora',
+       _r['modo'] == 'na hora' and _r['unidades'] == 10
+       and _loja.passos.count('compra') == 10 and 'ordem' not in _loja.passos,
+       f'{_r} {_loja.passos}')
+
+# travado em ordem e o painel nao abre: nao compra
+_loja = _LojaQueAnota({'Broadsword': [(900, 10)]}, painel_abre=False)
+_r, _ = _comprar_pela_rede(_loja, 10, [(900, 10)], modo_de_compra='ordem')
+
+checar('travado em ordem, sem painel, a linha fica de fora e diz por que',
+       _r['unidades'] == 0 and 'travado em ordem' in _r['motivo']
+       and 'compra' not in _loja.passos, f'{_r} {_loja.passos}')
+
+comum.zerar_contadores()
+
+
+# O TESTE DA REDE NA COMPRA: a primeira linha espera o livro mesmo com a rede
+# calada; as seguintes seguem com o que ela disse
+def _compra_com_rede(responde):
+
+    chamadas = []
+    linhas_do_log = []
+    reais = (comprador.escuta.ligada, comprador.escuta.ativa,
+             comprador.escuta.ofertas, comprador.relatar)
+
+    def ofertas(*a, mesmo_calado=False, **k):
+        chamadas.append(mesmo_calado)
+        return [(900, 4)] if responde else None
+
+    comprador.escuta.ligada = lambda: True
+    comprador.escuta.ativa = lambda: False
+    comprador.escuta.ofertas = ofertas
+    comprador.relatar = linhas_do_log.append
+
+    try:
+        _com_loja(_LojaQueAnota({'Broadsword': [(900, 4)]}), lambda: comprador.comprar(
+            'Thetford', [_linha('Broadsword', 'T6.0', 900, 2000, 2),
+                         _linha('Broadsword', 'T6.0', 900, 2000, 2)],
+            margem=0.2, taxa=lucro.TAXA_PADRAO, teto_de_prata=None))
+    finally:
+        (comprador.escuta.ligada, comprador.escuta.ativa,
+         comprador.escuta.ofertas, comprador.relatar) = reais
+
+    return chamadas, linhas_do_log
+
+
+_chamadas, _log = _compra_com_rede(responde=True)
+
+checar('a primeira linha da compra testa a rede, e so ela',
+       _chamadas == [True, False], str(_chamadas))
+
+checar('e o Andamento diz que a rede respondeu',
+       any('a rede respondeu' in l for l in _log), str(_log))
+
+_chamadas, _log = _compra_com_rede(responde=False)
+
+checar('sem resposta, a compra segue pelo painel e o Andamento fala de ExitLag',
+       _chamadas == [True, False] and any('ExitLag' in l for l in _log), str(_log))
 
 # --- o piso ----------------------------------------------------------------
 checar('com o "perto" padrao, o piso e 95% do alvo',

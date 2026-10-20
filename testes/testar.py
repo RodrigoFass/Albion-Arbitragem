@@ -4475,6 +4475,92 @@ comum.zerar_contadores()
 
 
 # ============================================================
+grupo('a referencia da cidade e a media das ofertas')
+
+# A PRIMEIRA OFERTA PODE TER UMA UNIDADE SO. Comprando dez, o custo de verdade e
+# a media das dez mais baratas - e uma oferta isolada la embaixo fazia a lista
+# prometer uma margem que so a primeira unidade pagava.
+_livro = [(1000, 1), (1200, 5), (5000, 10)]
+
+checar('a media e das unidades mais baratas ate a quantidade',
+       lucro.media_das_ofertas(_livro, 3) == round((1000 + 1200 * 2) / 3),
+       str(lucro.media_das_ofertas(_livro, 3)))
+
+checar('uma unidade e a primeira oferta', lucro.media_das_ofertas(_livro, 1) == 1000)
+
+checar('com menos unidades no livro que a quantidade, e a media de todas',
+       lucro.media_das_ofertas(_livro, 99) == round((1000 + 6000 + 50000) / 16))
+
+checar('sem oferta, sem media', lucro.media_das_ofertas([], 5) is None)
+
+_banco_media = mercado._banco
+mercado.usar_banco({})
+_agora_m = time.time()
+
+try:
+    mercado.gravar('Thetford', 'Broadsword', 'T6.0', 1000, _agora_m, ofertas=_livro)
+    mercado.gravar('Thetford', 'Claymore', 'T6.0', 1000, _agora_m)
+    for _it in ('Broadsword', 'Claymore'):
+        mercado.gravar(mercado.MERCADO_NEGRO, _it, 'T6.0', 9000, _agora_m, outro=8900)
+
+    _l, _ = lucro.montar([('Broadsword', 'T6.0', 3), ('Claymore', 'T6.0', 3)],
+                         'Thetford', margem_minima=0.0)
+    _por = {l['item']: l for l in _l}
+
+    checar('na cidade, a linha compra pela media das ofertas',
+           _por['Broadsword']['compra'] == round((1000 + 1200 * 2) / 3)
+           and _por['Broadsword']['compra_por_media']
+           and _por['Broadsword']['menor_oferta'] == 1000, str(_por['Broadsword']))
+
+    checar('e a margem cai junto, porque o custo de verdade e maior',
+           _por['Broadsword']['margem'] < _por['Claymore']['margem'])
+
+    checar('leitura antiga, sem o livro guardado, segue pela primeira oferta',
+           _por['Claymore']['compra'] == 1000 and not _por['Claymore']['compra_por_media'])
+
+    _l, _ = lucro.montar([('Broadsword', 'T6.0', 50)], 'Thetford', margem_minima=0.0,
+                         espacos=2)
+
+    checar('cortada pelos espacos, a linha continua dizendo que e media',
+           _l and _l[0]['quantidade'] == 2 and _l[0]['compra_por_media'], str(_l))
+
+    # O QUE A REDE GRAVOU FICA. A varredura grava depois do pacote, e substituir
+    # o registro inteiro apagava as qualidades - e agora apagaria o livro.
+    mercado.atualizar('Lymhurst', 'Bow', 'T7.0', preco=5000,
+                      qualidades={1: {'oferta': 5000}, 3: {'oferta': 7000}},
+                      ofertas=[(5000, 2), (5100, 4)], quando=_agora_m)
+    mercado.gravar('Lymhurst', 'Bow', 'T7.0', 5000, _agora_m + 5)
+
+    checar('a varredura nao apaga as qualidades nem o livro que a rede acabou de gravar',
+           mercado.ler_qualidades('Lymhurst', 'Bow', 'T7.0')[0].get(3)
+           and mercado.ler_ofertas('Lymhurst', 'Bow', 'T7.0') == [(5000, 2), (5100, 4)])
+
+    mercado.gravar('Lymhurst', 'Bow', 'T7.0', 5200, _agora_m + 3600)
+
+    checar('mas uma leitura de uma hora depois e outra: o velho sai',
+           not mercado.ler_qualidades('Lymhurst', 'Bow', 'T7.0')[0]
+           and mercado.ler_ofertas('Lymhurst', 'Bow', 'T7.0') is None)
+
+finally:
+    mercado.usar_banco(_banco_media)
+
+# PELA TELA, AS LINHAS VISIVEIS: uma unidade cada, ate a primeira que nao fizer
+# sentido (a lista e do mais barato para o mais caro)
+_linhas_da_lista = {cd.linha_preco(1): 1100, cd.linha_preco(2): 1250, cd.linha_preco(3): 900}
+_real_ler = comum.ler_numero
+comum.ler_numero = lambda regiao: _linhas_da_lista.get(tuple(regiao))
+
+try:
+    _vis = conferidor.CIDADE.ofertas_visiveis(1000)
+finally:
+    comum.ler_numero = _real_ler
+    comum.zerar_contadores()
+
+checar('pela tela, as linhas visiveis entram na media ate a primeira sem sentido',
+       _vis == [(1000, 1), (1100, 1), (1250, 1)], str(_vis))
+
+
+# ============================================================
 grupo('os avisos do canto de baixo')
 
 # O log so vai ser lido depois - a janela passa a varredura inteira minimizada.

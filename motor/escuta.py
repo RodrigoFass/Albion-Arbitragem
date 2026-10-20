@@ -240,6 +240,8 @@ def _gravar_no_banco(local, tronco, grau, ench, agora):
     qualidades = {q: {'oferta': _melhor(l, 'ofertas'), 'pedido': _melhor(l, 'pedidos')}
                   for q, l in livros.items()}
 
+    livro = None
+
     if local == mercado.MERCADO_NEGRO:
         normal = qualidades.get(1, {})
         preco, outro = normal.get('oferta'), normal.get('pedido')
@@ -247,11 +249,15 @@ def _gravar_no_banco(local, tronco, grau, ench, agora):
         ofertas = [v['oferta'] for v in qualidades.values() if v['oferta']]
         preco, outro = (min(ofertas) if ofertas else None), None
 
+        # NA CIDADE, O LIVRO INTEIRO: e dele que sai a media que a lista de
+        # compras usa (lucro.media_das_ofertas)
+        livro = sorted(o for l in livros.values() for o in (l.get('ofertas') or []))
+
     rot = mercado.rotulo(grau, ench)
 
     for nome in _nomes_por_tronco().get(tronco, []):
         mercado.atualizar(local, nome, rot, preco=preco, outro=outro,
-                          qualidades=qualidades, quando=agora)
+                          qualidades=qualidades, quando=agora, ofertas=livro)
 
 #endregion
 

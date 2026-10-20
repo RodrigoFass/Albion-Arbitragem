@@ -180,7 +180,22 @@ def salvar():
     return True, ''
 
 
-def gravar(mercado, item, rot, preco, quando=None, outro=None):
+# Quantas ofertas do livro guardar por combinacao: bastam para a media de
+# qualquer quantidade razoavel, e o arquivo nao incha.
+OFERTAS_GUARDADAS = 30
+
+# Ate quanto tempo atras o que a rede gravou num registro ainda e DESTA leitura.
+RECENTE_DA_REDE = 120
+
+
+def _ofertas_para_guardar(ofertas):
+    """[[preco, quantidade]] das mais baratas, para o json."""
+
+    return [[int(p), int(q)] for p, q in sorted(ofertas)[:OFERTAS_GUARDADAS]
+            if p and q]
+
+
+def gravar(mercado, item, rot, preco, quando=None, outro=None, ofertas=None):
     """Guarda um preco lido. <quando> em segundos desde a epoca.
 
     Sobrescreve o anterior de proposito: um preco velho do mesmo item na mesma
@@ -194,27 +209,46 @@ def gravar(mercado, item, rot, preco, quando=None, outro=None):
     Voltar depois so para pega-lo custaria a varredura inteira de novo.
 
     Fica de fora do registro quando nao houver: um campo ausente e menor e mais
-    honesto que um None gravado, e quem le ja trata a ausencia."""
+    honesto que um None gravado, e quem le ja trata a ausencia.
+
+    <ofertas> e o livro de venda, [(preco, quantidade)] - e dele que sai a
+    media que a lista de compras usa na cidade (ver lucro.media_das_ofertas).
+
+    O QUE A REDE GRAVOU AGORA HA POUCO FICA. A varredura grava depois que o
+    pacote ja entrou no registro, e substituir o registro inteiro apagava as
+    cinco qualidades que so a rede traz - a compra por qualidade nunca achava
+    linha para nada que tivesse sido varrido."""
 
     carregar()
 
     if preco is None:
         return
 
-    registro = {
-        'preco': int(preco),
-        'quando': float(quando if quando is not None else time.time()),
-    }
+    agora = float(quando if quando is not None else time.time())
+
+    registro = {'preco': int(preco), 'quando': agora}
 
     if outro is not None:
         registro['outro'] = int(outro)
 
     with _trava:
-        _banco.setdefault(mercado, {}).setdefault(item, {})[rot] = registro
+        combinacoes = _banco.setdefault(mercado, {}).setdefault(item, {})
+        anterior = combinacoes.get(rot) or {}
+
+        if (anterior.get('qualidades')
+                and agora - anterior.get('quando', 0) <= RECENTE_DA_REDE):
+            registro['qualidades'] = anterior['qualidades']
+
+        if ofertas:
+            registro['ofertas'] = _ofertas_para_guardar(ofertas)
+        elif anterior.get('ofertas') and agora - anterior.get('quando', 0) <= RECENTE_DA_REDE:
+            registro['ofertas'] = anterior['ofertas']
+
+        combinacoes[rot] = registro
 
 
 def atualizar(mercado, item, rot, preco=None, outro=None, qualidades=None,
-              quando=None):
+              quando=None, ofertas=None):
     """Junta ao registro o que chegou, sem apagar o que nao veio.
 
     E O CAMINHO DA REDE. Um pacote pode trazer so as ofertas de venda, e o
@@ -241,6 +275,9 @@ def atualizar(mercado, item, rot, preco=None, outro=None, qualidades=None,
             for q, valores in qualidades.items():
                 atuais.setdefault(str(q), {}).update(
                     {k: int(v) for k, v in valores.items() if v is not None})
+
+        if ofertas:
+            registro['ofertas'] = _ofertas_para_guardar(ofertas)
 
         registro['quando'] = float(quando if quando is not None else time.time())
 
@@ -273,6 +310,19 @@ def ler_qualidades(mercado, item, rot):
 
     return ({int(q): dict(v) for q, v in registro['qualidades'].items()},
             (time.time() - registro['quando']) / 3600)
+
+
+def ler_ofertas(mercado, item, rot):
+    """[(preco, quantidade)] do livro de venda guardado, mais barata primeiro, ou None."""
+
+    carregar()
+
+    registro = _banco.get(mercado, {}).get(item, {}).get(rot)
+
+    if not registro or not registro.get('ofertas'):
+        return None
+
+    return [(int(p), int(q)) for p, q in registro['ofertas']]
 
 
 def ler_outro(mercado, item, rot):

@@ -83,7 +83,8 @@ LINHAS_DO_LIVRO = cd.LIVRO_LINHAS
 #region O preco que ainda paga
 
 
-def preco_maximo(venda, margem, taxa=lucro.TAXA_PADRAO, por_ordem=True):
+def preco_maximo(venda, margem, taxa=lucro.TAXA_PADRAO, por_ordem=True,
+                 ordem_na_venda=False):
     """O maior preco de compra que ainda deixa <margem> de lucro.
 
     Sai de inverter a conta do lucro.liquido():
@@ -93,13 +94,16 @@ def preco_maximo(venda, margem, taxa=lucro.TAXA_PADRAO, por_ordem=True):
 
     e custo = compra * (1 + taxa de ordem), quando se compra por ordem.
 
+    <ordem_na_venda> e o caminho de venda da linha (lucro.melhor_venda): vender
+    por ordem paga os 2,5% tambem na saida, e o teto desce junto.
+
     E o preco a pedir na ordem: ele varre tudo que paga e para exatamente onde
     para de pagar. Um silver acima e a ordem comeca a comprar prejuizo."""
 
     if venda <= 0:
         return 0
 
-    teto = lucro.receita_real(venda, taxa) / (1 + margem)
+    teto = lucro.receita_real(venda, taxa, ordem_na_venda) / (1 + margem)
 
     if por_ordem:
         teto /= (1 + lucro.TAXA_DE_ORDEM)
@@ -202,7 +206,7 @@ def preencher(campo, regiao, valor):
 
 
 def planejar(ofertas, venda, margem, quantidade_maxima,
-             taxa=lucro.TAXA_PADRAO):
+             taxa=lucro.TAXA_PADRAO, ordem_na_venda=False):
     """Quanto pedir e a que preco. Devolve o plano, ou None se nao vale.
 
     Percorre as ofertas da mais barata para a mais cara enquanto elas pagarem a
@@ -214,7 +218,7 @@ def planejar(ofertas, venda, margem, quantidade_maxima,
     if not ofertas or quantidade_maxima <= 0:
         return None
 
-    teto = preco_maximo(venda, margem, taxa)
+    teto = preco_maximo(venda, margem, taxa, ordem_na_venda=ordem_na_venda)
 
     unidades = 0
     preco_da_ordem = 0
@@ -250,7 +254,7 @@ def planejar(ofertas, venda, margem, quantidade_maxima,
 
     custo = int(gasto * (1 + lucro.TAXA_DE_ORDEM))
     reservado = int(preco_da_ordem * unidades * (1 + lucro.TAXA_DE_ORDEM))
-    receita = int(lucro.receita_real(venda, taxa) * unidades)
+    receita = int(lucro.receita_real(venda, taxa, ordem_na_venda) * unidades)
 
     return {
         'preco': preco_da_ordem,
@@ -294,12 +298,13 @@ def por_ordem(unidades, preco, modo=None, minimo=None, caro=None):
 
 
 def decidir(ofertas, venda, margem, quantidade_maxima, taxa=lucro.TAXA_PADRAO,
-            modo=None, minimo=None, caro=None):
+            modo=None, minimo=None, caro=None, ordem_na_venda=False):
     """O plano completo: quanto, a que preco, e por qual dos dois caminhos.
 
     Devolve (plano, modo, motivo). <modo> e 'ordem' ou 'na hora'."""
 
-    plano = planejar(ofertas, venda, margem, quantidade_maxima, taxa)
+    plano = planejar(ofertas, venda, margem, quantidade_maxima, taxa,
+                     ordem_na_venda)
 
     if plano is None:
         return None, None, 'nenhuma oferta paga a margem'

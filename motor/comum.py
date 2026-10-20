@@ -32,6 +32,7 @@
 
 import csv
 import os
+import re
 import sys
 import threading
 import time
@@ -1461,6 +1462,28 @@ def numero_valido(texto):
         return None
 
     return valor
+
+
+# Um numero como o jogo escreve: 25.000, 25,000 ou 25000.
+_NUMERO_ESCRITO = re.compile(r'\d{1,3}(?:[.,]\d{3})+|\d+')
+
+
+def valor_do_dialogo(texto):
+    """O preco de um dialogo de confirmacao de VENDA, ou None.
+
+    NAO JUNTA OS DIGITOS DO TEXTO INTEIRO, como o numero_valido. "Quer vender 1
+    unidades de ... por 25.000 de prata?" daria 125.000 - um valor MAIOR que o
+    de verdade, e na venda maior e o lado perigoso: passa por cima do piso e
+    vende barato. Aqui cada numero escrito vale por si, e fica o maior que for
+    plausivel. Se o OCR partir o preco em dois, sai um numero MENOR, e o piso
+    recusa - o lado seguro."""
+
+    valores = [int(g.replace('.', '').replace(',', ''))
+               for g in _NUMERO_ESCRITO.findall(texto or '')]
+
+    valores = [v for v in valores if PRECO_MIN <= v <= PRECO_MAX]
+
+    return max(valores) if valores else None
 
 
 def tinta_na_borda(bruta):

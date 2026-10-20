@@ -99,9 +99,13 @@ _agora = time.time()
 
 mercado.usar_banco({})
 
+# A "venda" dele e o que ele RECEBE vendendo na hora: o pedido de compra do
+# Mercado Negro. Gravada nas duas colunas, a lista escolhe vender na hora por
+# ela - ver lucro.melhor_venda.
 for _rot, _q, _c, _v, _m in REFERENCIA:
     mercado.gravar('Thetford', 'Assassin Jacket', _rot, _c, _agora)
-    mercado.gravar(mercado.MERCADO_NEGRO, 'Assassin Jacket', _rot, _v, _agora)
+    mercado.gravar(mercado.MERCADO_NEGRO, 'Assassin Jacket', _rot, _v, _agora,
+                   outro=_v)
 
 CATALOGO = [('Assassin Jacket', r, q) for r, q, _, _, _ in REFERENCIA]
 
@@ -2068,7 +2072,8 @@ mercado.usar_banco({})
 
 _agora = time.time()
 mercado.gravar('Thetford', 'Assassin Jacket', 'T6.0', 49871, _agora)
-mercado.gravar(mercado.MERCADO_NEGRO, 'Assassin Jacket', 'T6.0', 61662, _agora)
+mercado.gravar(mercado.MERCADO_NEGRO, 'Assassin Jacket', 'T6.0', 61662, _agora,
+               outro=61662)
 
 _linhas, _resumo = lucro.montar(catalogo.para_calcular(), 'Thetford',
                                 margem_minima=0.0)
@@ -3492,8 +3497,11 @@ _modo, _preco, _motivo = vendedor.decidir(1000, 900, 1100, 0.20, 0.08)
 
 checar('fila abaixo do alvo nao vira ordem', _modo is None, f'{_modo} {_motivo}')
 
+# 1.341 = 1.000 x 1,20 / (1 - 8% - 2,5%). O pago ja e o custo real - a taxa de
+# ordem da compra, quando houve, foi gravada dentro dele -, e soma-la de novo
+# punha o alvo em 1.375.
 checar('e o motivo diz os dois numeros',
-       '1.100' in _motivo and '1.375' in _motivo, _motivo)
+       '1.100' in _motivo and '1.341' in _motivo, _motivo)
 
 # --- nem pedido de compra nem fila ----------------------------------------
 _modo, _, _motivo = vendedor.decidir(1000, None, None, 0.20, 0.08)
@@ -3517,40 +3525,41 @@ try:
     _hist.comprou('Thetford', 'Claymore', 'T6.0', 3, 2000, 'na hora')
     _hist.vendeu('Caerleon Mercado Negro', 'Broadsword', '', 2, 1500, 'na hora')
 
-    _carga = vendedor.carga_do_dia()
+    _carga = vendedor.carga_pendente()
 
     checar('a carga traz o que foi comprado e nao vendido',
-           dict((i, q) for i, _, q in _carga) == {'Broadsword': 3,
-                                                  'Claymore': 3},
+           {e['item']: e['unidades'] for e in _carga} == {'Broadsword': 3,
+                                                         'Claymore': 3},
            str(_carga))
 
     checar('com o preco pago de cada um',
-           dict((i, p) for i, p, _ in _carga) == {'Broadsword': 1000,
-                                                 'Claymore': 2000},
+           {e['item']: e['pago'] for e in _carga} == {'Broadsword': 1000,
+                                                     'Claymore': 2000},
+           str(_carga))
+
+    checar('e a combinacao comprada', {e['combinacao'] for e in _carga} == {'T6.0'},
            str(_carga))
 
     _hist.vendeu('Caerleon Mercado Negro', 'Broadsword', '', 3, 1500, 'na hora')
     _hist.vendeu('Caerleon Mercado Negro', 'Claymore', '', 3, 2600, 'ordem')
 
     checar('e some da carga quando tudo foi vendido',
-           vendedor.carga_do_dia() == [], str(vendedor.carga_do_dia()))
+           vendedor.carga_pendente() == [], str(vendedor.carga_pendente()))
 
-    # A UNIDADE COMPRADA POR QUALIDADE leva a qualidade junto; o resto continua
-    # com tres campos, vendido como Normal. Num arquivo a parte: o resumo do dia,
-    # logo abaixo, conta o de cima.
+    # A UNIDADE COMPRADA POR QUALIDADE leva a qualidade junto; o resto e vendido
+    # como Normal. Num arquivo a parte: o resumo do dia, logo abaixo, conta o de
+    # cima.
     _hist_principal = _hist.ARQUIVO
     _hist.ARQUIVO = os.path.join(_DADOS, '_hist_qualidade.csv')
 
     _hist.comprou('Thetford', 'Bow', 'T7.0', 2, 50_000, 'na hora', qualidade=3)
     _hist.comprou('Thetford', 'Bow', 'T7.0', 1, 40_000, 'na hora')
 
-    _carga_q = sorted(vendedor.carga_do_dia())
+    _carga_q = vendedor.carga_pendente()
 
     checar('a carga separa a unidade de qualidade da Normal',
-           _carga_q == [('Bow', 40_000, 1), ('Bow', 50_000, 2, 3)], str(_carga_q))
-
-    checar('e as duas formas se leem do mesmo jeito',
-           [vendedor.partes_da_carga(e)[3] for e in _carga_q] == [None, 3])
+           [(e['pago'], e['unidades'], e['qualidade']) for e in _carga_q]
+           == [(40_000, 1, None), (50_000, 2, 3)], str(_carga_q))
 
     checar('o historico guarda e devolve a qualidade',
            [o['qualidade'] for o in _hist.ler() if o['item'] == 'Bow'] == [3, None])
@@ -3573,19 +3582,23 @@ try:
            _lidas == {'Spear': None, 'Pike': 2}, str(_lidas))
 
     with open(_hist.ARQUIVO, encoding='utf-8') as _f:
-        checar('e o cabecalho fica com ela no fim',
-               _f.readline().strip().endswith(',qualidade'))
+        checar('e o cabecalho fica com as colunas novas no fim',
+               _f.readline().strip() == ','.join(_hist.COLUNAS))
 
     _hist.ARQUIVO = _hist_principal
 
     # O LUCRO AQUI E REALIZADO, e nao previsto - e a diferenca entre os dois e a
-    # unica medida honesta de quanto o bot acerta.
+    # unica medida honesta de quanto o bot acerta. A ordem de venda do Claymore
+    # so foi criada: fica em "em ordens", fora do recebido.
     _r = _hist.do_dia()
 
     checar('o resumo do dia soma as duas pontas',
            _r['gasto'] == 5 * 1000 + 3 * 2000
-           and _r['recebido'] == 2 * 1500 + 3 * 1500 + 3 * 2600,
+           and _r['recebido'] == 2 * 1500 + 3 * 1500,
            str(_r))
+
+    checar('e a ordem de venda criada fica a parte, sem contar como recebida',
+           _r['em_ordens'] == 3 * 2600, str(_r))
 
     checar('e o saldo e a diferenca',
            _r['saldo'] == _r['recebido'] - _r['gasto'], str(_r))
@@ -3597,6 +3610,337 @@ finally:
         pass
     _hist.ARQUIVO = _arquivo_real
     comum.zerar_contadores()
+
+
+# ============================================================
+grupo('a venda que a lista promete e a que o vendedor faz')
+
+# A LISTA E O VENDEDOR TEM DE FAZER A MESMA CONTA. A lista usava o menor pedido
+# de venda do Mercado Negro com a taxa de quem vende na hora - um caminho que nao
+# existe -, e o vendedor recusava vender por ordem o que ela aprovou entre 23% e
+# ~26%. Na hora, vendia toda a carga sem conferir o valor de cada unidade.
+
+from motor import escuta as _escuta   # noqa: E402
+
+# --- o caminho da venda ----------------------------------------------------
+checar('so com a fila, vende por ordem uma prata abaixo dela',
+       lucro.melhor_venda(2000, None) == (1999, True), str(lucro.melhor_venda(2000, None)))
+
+checar('com o pedido de compra perto da fila, vende na hora pelo pedido',
+       lucro.melhor_venda(2000, 1990) == (1990, False), str(lucro.melhor_venda(2000, 1990)))
+
+checar('com o pedido longe da fila, a ordem rende mais',
+       lucro.melhor_venda(2000, 1000) == (1999, True), str(lucro.melhor_venda(2000, 1000)))
+
+# 81.270.374 contra uma fila de 1.659.971: lido assim por OCR, nos precos reais
+checar('pedido acima da fila e leitura errada, e fica de fora',
+       lucro.melhor_venda(1_659_971, 81_270_374) == (1_659_970, True))
+
+checar('so com o pedido, vende na hora', lucro.melhor_venda(None, 1500) == (1500, False))
+
+checar('sem nenhum dos dois, nao ha venda', lucro.melhor_venda(None, None) == (None, None))
+
+# --- a lista usa o caminho de verdade ---------------------------------------
+_banco_venda = mercado._banco
+mercado.usar_banco({})
+_agora_v = time.time()
+
+
+def _precos(item, compra_, fila, pedido=None):
+    mercado.gravar('Thetford', item, 'T6.0', compra_, _agora_v)
+    mercado.gravar(mercado.MERCADO_NEGRO, item, 'T6.0', fila, _agora_v, outro=pedido)
+
+
+try:
+    # O CASO DOS PRECOS REAIS: pedido de compra num quarto da fila
+    _precos('Knight Helmet', 29_471, 116_349, 30_312)
+
+    _l, _ = lucro.montar([('Knight Helmet', 'T6.0', 5)], 'Thetford', margem_minima=0.0)
+
+    checar('com o pedido baixo, a linha vende pela fila, por ordem',
+           _l and _l[0]['venda'] == 116_348 and _l[0]['venda_por_ordem'], str(_l))
+
+    checar('e a margem desconta os 2,5% da ordem de venda',
+           _l and abs(_l[0]['margem']
+                      - lucro.liquido(29_471, 116_348, ordem_na_venda=True)) < 1e-9
+           and _l[0]['margem'] < lucro.liquido(29_471, 116_349))
+
+    # 1.000 por ordem custa 1.025; com a fila em 1.422 a venda por ordem rende
+    # 24%. Antes a lista aprovava e o vendedor, com os mesmos precos, recusava.
+    _precos('Broadsword', 1000, 1422)
+
+    _l, _ = lucro.montar([('Broadsword', 'T6.0', 5)], 'Thetford', margem_minima=0.23)
+
+    checar('a lista aprova a venda por ordem com 24%',
+           len(_l) == 1 and 0.23 <= _l[0]['margem'] < 0.25, str(_l))
+
+    # o historico grava o custo da compra por ordem com a taxa dentro
+    _pago_v = int(_l[0]['custo'] / _l[0]['quantidade']) if _l else 0
+    _modo, _preco, _motivo = vendedor.decidir(_pago_v, None, 1422, 0.23, lucro.TAXA_PADRAO)
+
+    checar('e o vendedor, com os mesmos precos, vende pelo mesmo caminho',
+           _modo == 'ordem' and _preco == 1421, f'{_modo} {_preco} {_motivo}')
+
+    _precos('Claymore', 1000, 1500, 1480)
+
+    _l, _ = lucro.montar([('Claymore', 'T6.0', 5)], 'Thetford', margem_minima=0.23)
+
+    checar('com o pedido perto da fila, a lista conta a venda na hora',
+           _l and not _l[0]['venda_por_ordem'] and _l[0]['venda'] == 1480, str(_l))
+
+    _modo, _preco, _ = vendedor.decidir(1025, 1480, 1500, 0.23, lucro.TAXA_PADRAO)
+
+    checar('e o vendedor vende na hora pelo mesmo pedido',
+           _modo == 'na hora' and _preco == 1480, f'{_modo} {_preco}')
+
+    _l, _ = lucro.montar([('Claymore', 'T6.0', 50)], 'Thetford', margem_minima=0.0,
+                         espacos=10)
+
+    checar('cortada pelos espacos, a linha guarda o caminho da venda',
+           _l and _l[0]['quantidade'] == 10 and not _l[0]['venda_por_ordem'], str(_l))
+
+finally:
+    mercado.usar_banco(_banco_venda)
+
+# --- o teto de compra segue o caminho da venda -----------------------------
+checar('vender por ordem baixa o teto de compra',
+       compra.preco_maximo(10000, 0.23, ordem_na_venda=True)
+       < compra.preco_maximo(10000, 0.23))
+
+_hora = compra.planejar([(1000, 10), (1080, 10)], 1500, 0.23, 100)
+_ordem = compra.planejar([(1000, 10), (1080, 10)], 1500, 0.23, 100, ordem_na_venda=True)
+
+checar('e o plano compra menos quando a venda e por ordem',
+       _hora['unidades'] == 20 and _ordem['unidades'] == 10,
+       f'{_hora["unidades"]} contra {_ordem["unidades"]}')
+
+# o dialogo cobra 1.470: paga a margem vendendo na hora (teto 1.495), mas nao
+# vendendo por ordem (teto 1.455)
+_linha_ordem = _linha('Broadsword', 'T6.0', 900, 2000, 2)
+_linha_ordem['venda_por_ordem'] = True
+
+_r, _reg = _com_loja(Loja({'Broadsword': [(900, 2)]}, dialogo_mente={'Broadsword': 1470}),
+                     lambda: comprador.comprar_linha(_linha_ordem, 'Thetford', 0.2,
+                                                     lucro.TAXA_PADRAO))
+
+checar('o dialogo da compra e julgado pelo caminho da venda da linha',
+       _r['unidades'] == 0 and not _reg, str(_r))
+
+_r, _ = _com_loja(Loja({'Broadsword': [(900, 2)]}, dialogo_mente={'Broadsword': 1470}),
+                  lambda: comprador.comprar_linha(_linha('Broadsword', 'T6.0', 900, 2000, 2),
+                                                  'Thetford', 0.2, lucro.TAXA_PADRAO))
+
+checar('e o mesmo valor passa quando a venda e na hora', _r['unidades'] == 2, str(_r))
+
+# --- o piso ----------------------------------------------------------------
+checar('com o "perto" padrao, o piso e 95% do alvo',
+       vendedor.piso(1000, 0.20, 0.08)
+       == int(vendedor.alvo(1000, 0.20, 0.08) * 0.95 + 0.999))
+
+_piso_baixo = vendedor.piso(1000, 0.20, 0.08, perto=0.5)
+
+checar('e nunca fica abaixo do custo, nem com o "perto" em 50%',
+       lucro.receita_real(_piso_baixo, 0.08) >= 1000, str(_piso_baixo))
+
+_modo, _preco, _ = vendedor.decidir(1000, 5000, 1500, 0.20, 0.08)
+
+checar('pedido acima da fila nao vira venda na hora',
+       _modo == 'ordem' and _preco == 1499, f'{_modo} {_preco}')
+
+# --- o numero do dialogo ---------------------------------------------------
+checar('o valor do dialogo nao junta o "1 unidades" ao preco',
+       comum.valor_do_dialogo('Quer vender 1 unidades de Espada Larga por 25.000 '
+                              'de prata?') == 25000)
+
+checar('com virgula de milhar tambem',
+       comum.valor_do_dialogo('Do you want to sell 1 Broadsword for 1,234,567 '
+                              'silver?') == 1_234_567)
+
+checar('sem preco legivel, nada',
+       comum.valor_do_dialogo('Quer vender 1 unidades de Espada por de prata?') is None)
+
+checar('preco partido pelo OCR sai menor, e nao maior',
+       (comum.valor_do_dialogo('por 125 000 de prata') or 0) < 125_000)
+
+# --- vender na hora, unidade por unidade ----------------------------------
+
+
+def _dialogo(valor):
+    return f'Quer vender 1 unidades de Espada Larga por {valor} de prata?'
+
+
+def _vender_com(pedido, fila, dialogos, rede=None, aberta=None, **kw):
+    """vender_item contra um Mercado Negro de mentira. (saida, cliques, vendas)."""
+
+    reais = (vendedor.abrir, vendedor.fechar, vendedor.ler_precos,
+             vendedor.criar_ordem, _escuta.ultimo_do_item, _escuta.combinacao_aberta,
+             comum.clicar, comum.assinatura, comum.esperar_mudanca,
+             comum.esperar_estavel, comum.ler_texto, comum.salvar_diagnostico,
+             _hist.ARQUIVO)
+
+    cliques = []
+    fila_de_dialogos = list(dialogos)
+
+    vendedor.abrir = lambda item, nome=None: (True, '')
+    vendedor.fechar = lambda: None
+    vendedor.ler_precos = lambda: (pedido, fila)
+    vendedor.criar_ordem = lambda preco, unidades: (True, '')
+    _escuta.ultimo_do_item = lambda *a, **k: rede
+    _escuta.combinacao_aberta = lambda *a, **k: aberta
+    comum.clicar = lambda pos, espera=None: cliques.append(pos)
+    comum.assinatura = lambda regiao: b''
+    comum.esperar_mudanca = lambda *a, **k: True
+    comum.esperar_estavel = lambda *a, **k: True
+    comum.ler_texto = lambda regiao: fila_de_dialogos.pop(0) if fila_de_dialogos else ''
+    comum.salvar_diagnostico = lambda *a, **k: None
+
+    _hist.ARQUIVO = os.path.join(_DADOS, '_hist_venda.csv')
+
+    if os.path.exists(_hist.ARQUIVO):
+        os.remove(_hist.ARQUIVO)
+
+    try:
+        saida = vendedor.vender_item(kw.pop('item', 'Broadsword'), kw.pop('pago', 1000),
+                                     kw.pop('unidades', 3), 0.20, 0.08, **kw)
+        vendas = _hist.ler()
+
+    finally:
+        (vendedor.abrir, vendedor.fechar, vendedor.ler_precos,
+         vendedor.criar_ordem, _escuta.ultimo_do_item, _escuta.combinacao_aberta,
+         comum.clicar, comum.assinatura, comum.esperar_mudanca,
+         comum.esperar_estavel, comum.ler_texto, comum.salvar_diagnostico,
+         _hist.ARQUIVO) = reais
+
+    return saida, cliques, vendas
+
+
+# pago 1.000 com 20% e 8%: alvo 1.305, piso 1.240. O primeiro pedido paga 1.300;
+# vendido ele, o segundo paga 1.290, e o terceiro so 1.100.
+_s, _cl, _vendas = _vender_com(1300, 1500, [_dialogo('1.300'), _dialogo('1.290'),
+                                             _dialogo('1.100')], combinacao='T5.2')
+
+checar('vende enquanto o dialogo paga o piso, e para no que nao paga',
+       _s['unidades'] == 2 and 'piso' in _s['motivo'], str(_s))
+
+checar('o dialogo abaixo do piso e recusado no jogo',
+       _cl.count(cd.CMP_CONFIRMAR_SIM) == 2 and _cl.count(cd.CMP_NAO_COMPRAR) == 1,
+       str(_cl))
+
+checar('o recebido e o historico sao liquidos de taxa',
+       _s['recebido'] == int(1300 * 0.92) + int(1290 * 0.92)
+       and [v['liquido'] for v in _vendas] == [int(1300 * 0.92), int(1290 * 0.92)],
+       f'{_s} {[v["liquido"] for v in _vendas]}')
+
+checar('e sem a rede confirmar o grau, a venda vai sem combinacao',
+       [v['combinacao'] for v in _vendas] == ['', ''], str(_vendas))
+
+_s, _, _ = _vender_com(1300, 1500, [_dialogo('1.300'), _dialogo('???')], unidades=3)
+
+checar('dialogo ilegivel depois da primeira unidade para a venda',
+       _s['unidades'] == 1, str(_s))
+
+_s, _, _vendas = _vender_com(1300, 1500, [_dialogo('???'), _dialogo('1.300')], unidades=2)
+
+checar('na primeira unidade vale o pedido que acabou de ser lido',
+       _s['unidades'] == 2 and _vendas[0]['preco'] == 1300, str(_s))
+
+_s, _cl, _ = _vender_com(1300, 1500, [_dialogo('1.300')], rede=(1300, 1500),
+                         aberta='T8.0', combinacao='T5.2')
+
+checar('com a rede dizendo que o painel abriu outra combinacao, nao vende',
+       _s['unidades'] == 0 and 'T8.0' in _s['motivo'] and not _cl, str(_s))
+
+_s, _, _vendas = _vender_com(1300, 1500, [_dialogo('1.300')], rede=(1300, 1500),
+                             aberta='T5.2', combinacao='T5.2', unidades=1)
+
+checar('com a rede confirmando, a venda grava a combinacao',
+       _s['unidades'] == 1 and _vendas[0]['combinacao'] == 'T5.2', str(_vendas))
+
+_s, _cl, _ = _vender_com(1300, 1500, [_dialogo('1.300')], combinacao='T5.2',
+                         pago_se_incerto=5000)
+
+checar('sem confirmar o grau, decide pelo custo do mais caro da carga',
+       _s['unidades'] == 0 and not _cl, str(_s))
+
+_s, _, _vendas = _vender_com(None, 1500, [], unidades=2)
+
+checar('a ordem de venda nao conta como recebida',
+       _s['modo'] == 'ordem' and _s['recebido'] == 0
+       and _s['em_ordem'] == int(1499 * (1 - 0.08 - lucro.TAXA_DE_ORDEM) * 2), str(_s))
+
+checar('e vai para o historico como ordem, com o liquido previsto',
+       _vendas and _vendas[0]['modo'] == _hist.ORDEM
+       and _vendas[0]['liquido'] == _s['em_ordem'], str(_vendas))
+
+# --- a carga --------------------------------------------------------------
+_arquivo_real = _hist.ARQUIVO
+_hist.ARQUIVO = os.path.join(_DADOS, '_hist_carga.csv')
+
+try:
+    if os.path.exists(_hist.ARQUIVO):
+        os.remove(_hist.ARQUIVO)
+
+    _agora_v = time.time()
+    _negro = mercado.MERCADO_NEGRO
+
+    _hist.registrar(_hist.COMPRA, 'Thetford', 'Broadsword', 'T5.2', 2, 1000,
+                    'na hora', quando=_agora_v - 50 * 3600)
+    _hist.registrar(_hist.COMPRA, 'Thetford', 'Broadsword', 'T5.2', 3, 1100,
+                    'na hora', quando=_agora_v - 30 * 3600)
+    _hist.registrar(_hist.COMPRA, 'Thetford', 'Broadsword', 'T8.0', 1, 30_000,
+                    'ordem', quando=_agora_v - 60)
+
+    _c = vendedor.carga_pendente()
+
+    checar('a carga atravessa a meia-noite: a compra de 30 h atras continua nela',
+           any(e['pago'] == 1100 and e['unidades'] == 3 for e in _c), str(_c))
+
+    checar('e a de mais de 48 h fica de fora', not any(e['pago'] == 1000 for e in _c))
+
+    _hist.vendeu(_negro, 'Broadsword', 'T8.0', 1, 40_000, 'na hora')
+
+    _c = vendedor.carga_pendente()
+
+    checar('a venda que sabe a combinacao abate a compra dela',
+           [(e['combinacao'], e['unidades']) for e in _c] == [('T5.2', 3)], str(_c))
+
+    _hist.vendeu(_negro, 'Broadsword', '', 2, 1500, 'na hora')
+
+    checar('a que nao sabe abate a mais antiga do item',
+           [(e['combinacao'], e['unidades']) for e in vendedor.carga_pendente()]
+           == [('T5.2', 1)])
+
+    _dois_graus = [
+        {'item': 'Broadsword', 'combinacao': 'T5.2', 'pago': 1000, 'unidades': 2, 'qualidade': None},
+        {'item': 'Broadsword', 'combinacao': 'T8.0', 'pago': 30_000, 'unidades': 1, 'qualidade': None},
+        {'item': 'Claymore', 'combinacao': 'T6.0', 'pago': 2000, 'unidades': 1, 'qualidade': None},
+    ]
+
+    checar('sem confirmar o grau, o item em duas combinacoes decide pelo mais caro',
+           vendedor.custos_se_incerto(_dois_graus) == [30_000, 30_000, 2000])
+
+finally:
+    try:
+        os.remove(_hist.ARQUIVO)
+    except OSError:
+        pass
+    _hist.ARQUIVO = _arquivo_real
+
+# --- o saldo ----------------------------------------------------------------
+_s = _hist.somar([
+    {'operacao': 'compra', 'total': 2000, 'unidades': 2, 'modo': 'na hora', 'liquido': None},
+    {'operacao': 'venda', 'total': 3000, 'unidades': 2, 'modo': 'na hora', 'liquido': 2760},
+    {'operacao': 'venda', 'total': 1000, 'unidades': 1, 'modo': 'ordem', 'liquido': 895},
+    {'operacao': 'venda', 'total': 500, 'unidades': 1, 'modo': 'na hora', 'liquido': None},
+])
+
+checar('o recebido e liquido de taxa, e a linha antiga entra pelo total',
+       _s['recebido'] == 2760 + 500, str(_s))
+
+checar('a ordem de venda fica em "em ordens", fora do saldo',
+       _s['em_ordens'] == 895 and _s['saldo'] == 2760 + 500 - 2000, str(_s))
+
+comum.zerar_contadores()
 
 
 # ============================================================

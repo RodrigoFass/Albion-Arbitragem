@@ -57,7 +57,10 @@
     }
 
     const plural = (n, um, varios) => `${fmt(n)} ${n === 1 ? um : varios}`;
-    recebido.mostrar(fmt(s.recebido), plural(s.vendas, 'venda', 'vendas'));
+    // ORDEM DE VENDA CRIADA NAO E PRATA RECEBIDA: ela aparece a parte, e o saldo
+    // nao a conta - o bot nao sabe quando ela vende
+    recebido.mostrar(fmt(s.recebido), plural(s.vendas, 'venda', 'vendas')
+      + (s.em_ordens ? ` · ${fmt(s.em_ordens)} em ordens` : ''));
     saldo.mostrar(fmt(s.saldo), `${fmt(s.gasto)} gastos`, s.saldo > 0 ? 'ok' : (s.saldo < 0 ? 'perigo' : ''));
     unidades.mostrar(fmt(s.unidades), plural(s.compras, 'compra', 'compras'));
     // so existe margem depois de vender, e com carga parada ela ainda inclui o

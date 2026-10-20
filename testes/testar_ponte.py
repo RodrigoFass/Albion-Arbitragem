@@ -33,6 +33,7 @@ from motor import ajustes     # noqa: E402
 from motor import catalogo    # noqa: E402
 from motor import comum       # noqa: E402
 from motor import historico   # noqa: E402
+from motor import lucro       # noqa: E402
 from motor import mercado     # noqa: E402
 from interface import ponte       # noqa: E402
 
@@ -234,6 +235,19 @@ checar('a carga vem do historico de hoje', r['unidades'] == 3, str(r))
 checar('e cada linha diz o alvo', r['linhas'] and r['linhas'][0]['alvo'] > 10000)
 checar('e vira JSON', vira_json(r))
 
+# A PREVISAO E DA COMBINACAO COMPRADA. Antes ela pegava o maior pedido do item
+# em qualquer grau - o do T8.0 prevendo a venda de um T6.0.
+mercado.gravar(mercado.MERCADO_NEGRO, 'Broadsword', 'T6.0', 15000, outro=14800)
+mercado.gravar(mercado.MERCADO_NEGRO, 'Broadsword', 'T8.0', 450000, outro=400000)
+
+r = api.calcular_venda('23', '95')
+l = r['linhas'][0] if r['linhas'] else {}
+checar('a previsao usa os precos da combinacao comprada',
+       l.get('combinacao') == 'T6.0' and l.get('modo') == 'na hora', str(l))
+checar('e o previsto e liquido de taxa',
+       l.get('previsto') == int(lucro.receita_real(14800, lucro.TAXA_SEM_PREMIUM) * 3),
+       str(l))
+
 
 # ============================================================
 grupo('o historico')
@@ -251,6 +265,15 @@ checar('e sem venda nao ha margem', r['resumo']['margem'] is None)
 
 checar('os destaques dizem a cidade onde mais comprou',
        api.historico('', 'tudo')['destaques']['cidade']['valor'] == 'Thetford')
+
+# ORDEM DE VENDA CRIADA NAO E PRATA RECEBIDA
+historico.vendeu(mercado.MERCADO_NEGRO, 'Claymore', '', 2, 5000, modo='ordem',
+                 liquido=8950)
+
+r = api.historico('', 'tudo')
+checar('a ordem de venda aparece em "em ordens", fora do saldo',
+       r['resumo']['em_ordens'] == 8950 and r['resumo']['saldo'] == 19000 - 30000,
+       str(r['resumo']))
 
 
 # ============================================================

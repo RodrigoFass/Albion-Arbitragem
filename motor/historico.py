@@ -56,7 +56,10 @@ ARQUIVO = comum.ARQUIVO_HISTORICO
 # nova entra NO FIM - quem le por nome nao se importa, e quem abre na planilha ve
 # a coluna nova vazia nas linhas velhas em vez de tudo deslocado.
 COLUNAS = ['quando', 'operacao', 'mercado', 'item', 'combinacao', 'unidades',
-           'preco', 'total', 'modo', 'observacao', 'qualidade']
+           'preco', 'total', 'modo', 'observacao', 'qualidade', 'liquido']
+
+# Modo da venda que so CRIOU uma ordem: a prata ainda nao entrou.
+ORDEM = 'ordem'
 
 COMPRA = 'compra'
 VENDA = 'venda'
@@ -67,11 +70,15 @@ VENDA = 'venda'
 
 
 def registrar(operacao, mercado, item, combinacao, unidades, preco,
-              modo='', observacao='', quando=None, qualidade=None):
+              modo='', observacao='', quando=None, qualidade=None, liquido=None):
     """Guarda uma operacao. Devolve (ok, erro).
 
     <preco> e por unidade e E O QUE O JOGO COBROU - ver o cabecalho.
     <modo> distingue 'na hora' de 'ordem', que tem taxas diferentes.
+
+    <liquido> e o que a operacao inteira poe no bolso depois das taxas. So a
+    venda passa: o preco dela e o de tabela, e a taxa de venda sai depois. Sem
+    ele, o saldo somava a taxa como se fosse lucro.
 
     NUNCA LEVANTA. Uma falha ao gravar o historico nao pode derrubar uma compra
     que ja aconteceu: a prata ja saiu, e perder o registro e ruim, mas abortar o
@@ -92,6 +99,7 @@ def registrar(operacao, mercado, item, combinacao, unidades, preco,
         # vazio = qualquer qualidade, como sempre foi; so a compra por
         # qualidade preenche
         'qualidade': int(qualidade) if qualidade else '',
+        'liquido': int(liquido) if liquido is not None else '',
     }
 
     try:
@@ -155,9 +163,9 @@ def comprou(mercado, item, combinacao, unidades, preco, modo='', observacao='',
 
 
 def vendeu(mercado, item, combinacao, unidades, preco, modo='', observacao='',
-           qualidade=None):
+           qualidade=None, liquido=None):
     return registrar(VENDA, mercado, item, combinacao, unidades, preco,
-                     modo, observacao, qualidade=qualidade)
+                     modo, observacao, qualidade=qualidade, liquido=liquido)
 
 #endregion
 
@@ -197,6 +205,12 @@ def ler(desde=None):
         except (TypeError, ValueError):
             linha['qualidade'] = None
 
+        # vazio = linha de antes da coluna, ou compra (que nao paga taxa depois)
+        try:
+            linha['liquido'] = int(linha['liquido']) if linha.get('liquido') else None
+        except (TypeError, ValueError):
+            linha['liquido'] = None
+
         linha['momento'] = _momento(linha.get('quando'))
 
         if desde is not None and linha['momento'] < desde:
@@ -216,28 +230,45 @@ def _momento(texto):
         return 0.0
 
 
-def resumo(desde=None):
-    """Quanto entrou, quanto saiu e o que sobrou.
+def somar(operacoes):
+    """Quanto entrou, quanto saiu e o que sobrou, de uma lista de operacoes.
 
     O LUCRO AQUI E REALIZADO, e nao previsto. A tela de compra mostra o lucro que
     a lista PROMETE; este e o que de fato aconteceu, e a diferenca entre os dois
-    e a unica medida honesta de quanto o bot acerta."""
+    e a unica medida honesta de quanto o bot acerta.
 
-    operacoes = ler(desde)
+    DUAS COISAS QUE PARECIAM RECEBIDAS E NAO ERAM:
 
-    gasto = sum(o['total'] for o in operacoes if o['operacao'] == COMPRA)
-    recebido = sum(o['total'] for o in operacoes if o['operacao'] == VENDA)
+      - a ORDEM DE VENDA criada. Ela fica na fila e pode nunca vender; o bot nao
+        tem como saber quando ela casa. Vai para <em_ordens>, fora do saldo.
+      - a TAXA DE VENDA. Conta o <liquido> de cada venda; as linhas de antes da
+        coluna nao o tem, e entram pelo total de tabela."""
+
+    compras = [o for o in operacoes if o['operacao'] == COMPRA]
+    vendas = [o for o in operacoes if o['operacao'] == VENDA]
+
+    def entra(o):
+        return o['liquido'] if o.get('liquido') is not None else o['total']
+
+    gasto = sum(o['total'] for o in compras)
+    recebido = sum(entra(o) for o in vendas if o.get('modo') != ORDEM)
 
     return {
         'operacoes': len(operacoes),
-        'compras': sum(1 for o in operacoes if o['operacao'] == COMPRA),
-        'vendas': sum(1 for o in operacoes if o['operacao'] == VENDA),
-        'unidades_compradas': sum(o['unidades'] for o in operacoes
-                                  if o['operacao'] == COMPRA),
+        'compras': len(compras),
+        'vendas': len(vendas),
+        'unidades_compradas': sum(o['unidades'] for o in compras),
         'gasto': gasto,
         'recebido': recebido,
+        'em_ordens': sum(entra(o) for o in vendas if o.get('modo') == ORDEM),
         'saldo': recebido - gasto,
     }
+
+
+def resumo(desde=None):
+    """O somar() do que foi gravado desde <desde>."""
+
+    return somar(ler(desde))
 
 
 def do_dia():

@@ -187,7 +187,7 @@ class Api:
             'catalogo': {'nome': catalogo.nome_atual(), **r},
             'precos': mercado.quantidade(),
             'mercados_lidos': len(mercado.mercados_lidos()),
-            'carga': sum(vendedor.partes_da_carga(e)[2] for e in vendedor.carga_do_dia()),
+            'carga': sum(e['unidades'] for e in vendedor.carga_pendente()),
         }
 
     def erro_js(self, texto):
@@ -505,10 +505,12 @@ class Api:
     # ======================================================================
 
     def calcular_venda(self, margem=None, perto=None):
-        """A carga de hoje, com o caminho previsto para cada item."""
+        """A carga a vender, com o caminho previsto para cada item."""
 
         mercado.carregar()
         conf = ajustes.atuais()
+        taxa = conf['taxa']
+        negro = mercado.MERCADO_NEGRO
 
         margem = _numero(margem)
         margem = conf['margem'] if margem is None else margem / 100
@@ -517,7 +519,7 @@ class Api:
         perto = (vendedor.PERTO_DO_ALVO if perto is None
                  else max(0.5, min(1.5, perto / 100)))
 
-        carga = vendedor.carga_do_dia()
+        carga = vendedor.carga_pendente()
         do_dia = historico.do_dia()
 
         self._venda = (carga, margem, perto) if carga else None
@@ -525,42 +527,49 @@ class Api:
         linhas = []
         pago_total = previsto_total = 0
 
-        for entrada in carga:
+        for e in carga:
 
-            item, pago, quantas, qualidade = vendedor.partes_da_carga(entrada)
+            item, rot, pago, quantas = e['item'], e['combinacao'], e['pago'], e['unidades']
+            qualidade = e['qualidade']
 
-            # OS PRECOS DO ULTIMO CONFERIR: uma previsao. No jogo a decisao e
-            # refeita com o livro do momento.
-            pedido = _maior(mercado.ler_outro(mercado.MERCADO_NEGRO, item, r)
-                            for r in mercado.combinacoes(mercado.MERCADO_NEGRO, item))
+            # OS PRECOS DO ULTIMO CONFERIR, DA COMBINACAO COMPRADA: uma previsao.
+            # No jogo a decisao e refeita com o livro do momento. Sem a
+            # combinacao nao ha previsao - o maior pedido do item em qualquer
+            # grau seria o de um T8 prevendo um T5.
+            menor, pedido = (mercado.ler(negro, item, rot)[0],
+                             mercado.ler_outro(negro, item, rot)) if rot else (None, None)
 
             # a unidade comprada por qualidade conta com os pedidos que ela atende
-            if qualidade:
+            if qualidade and rot:
                 pedido = _maior([pedido] + [
                     v.get('pedido')
-                    for r in mercado.combinacoes(mercado.MERCADO_NEGRO, item)
-                    for q, v in mercado.ler_qualidades(mercado.MERCADO_NEGRO, item, r)[0].items()
+                    for q, v in mercado.ler_qualidades(negro, item, rot)[0].items()
                     if q <= qualidade])
-            menor = _menor(mercado.ler(mercado.MERCADO_NEGRO, item, r)[0]
-                           for r in mercado.combinacoes(mercado.MERCADO_NEGRO, item))
 
             modo, preco, motivo = vendedor.decidir(pago, pedido, menor, margem,
-                                                   conf['taxa'], perto)
+                                                   taxa, perto)
 
-            previsto = (preco or 0) * quantas if modo else 0
+            if not rot:
+                motivo = 'sem a combinacao comprada, nao da para prever'
+
+            # LIQUIDO, como a tela promete: a taxa de venda, e a de ordem quando
+            # o caminho e a fila
+            previsto = (int(lucro.receita_real(preco, taxa, modo == 'ordem') * quantas)
+                        if modo else 0)
             pago_total += pago * quantas
             previsto_total += previsto
 
-            linhas.append({'item': item, 'pago': pago, 'quantidade': quantas,
-                           'qualidade': qualidade,
-                           'alvo': vendedor.alvo(pago, margem, conf['taxa']),
+            linhas.append({'item': item, 'combinacao': rot, 'pago': pago,
+                           'quantidade': quantas, 'qualidade': qualidade,
+                           'alvo': vendedor.alvo(pago, margem, taxa),
                            'modo': modo, 'previsto': previsto, 'motivo': motivo})
 
         return {
             'linhas': linhas,
             'pago': pago_total,
             'previsto': previsto_total,
-            'unidades': sum(vendedor.partes_da_carga(e)[2] for e in carga),
+            'unidades': sum(e['unidades'] for e in carga),
+            'horas': vendedor.HORAS_DA_CARGA,
             'do_dia': do_dia,
         }
 
@@ -826,16 +835,19 @@ class Api:
         compras = [o for o in linhas if o['operacao'] == historico.COMPRA]
         vendas = [o for o in linhas if o['operacao'] == historico.VENDA]
 
-        gasto = sum(o['total'] for o in compras)
-        recebido = sum(o['total'] for o in vendas)
+        # A MESMA SOMA DO RESUMO DO DIA: so o que entrou de verdade, liquido de
+        # taxa; ordem de venda criada fica a parte
+        s = historico.somar(linhas)
 
         resumo = {
-            'compras': len(compras), 'vendas': len(vendas),
-            'unidades': sum(o['unidades'] for o in compras),
-            'gasto': gasto, 'recebido': recebido, 'saldo': recebido - gasto,
+            'compras': s['compras'], 'vendas': s['vendas'],
+            'unidades': s['unidades_compradas'],
+            'gasto': s['gasto'], 'recebido': s['recebido'],
+            'em_ordens': s['em_ordens'], 'saldo': s['saldo'],
             # SO EXISTE MARGEM DEPOIS DE VENDER: com a carga parada o saldo e
             # negativo por definicao, e "-100%" seria alarme falso
-            'margem': (recebido - gasto) / gasto if gasto and recebido else None,
+            'margem': (s['saldo'] / s['gasto']
+                       if s['gasto'] and s['recebido'] else None),
         }
 
         destaques = {}
@@ -1231,11 +1243,6 @@ class Api:
 def _maior(valores):
     validos = [v for v in valores if v]
     return max(validos) if validos else None
-
-
-def _menor(valores):
-    validos = [v for v in valores if v]
-    return min(validos) if validos else None
 
 
 def _avisar_que_terminou():

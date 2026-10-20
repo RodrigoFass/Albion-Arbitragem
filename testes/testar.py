@@ -1688,6 +1688,160 @@ checar('opcao que nao fez a lista fechar vira contador',
 comum.zerar_contadores()
 
 
+# --- a lista de encantamento tem de fechar DE VERDADE ----------------------
+# O jogo ganhou o "Enchantment 4", e com a lista aberta essa opcao cobre o preco
+# inteiro. Os oito PNGs de borda da varredura de Lymhurst eram o mesmo
+# "...chantment 4": o bot dava a lista por fechada no primeiro quadro da
+# animacao de fechar, e lia o texto dela no lugar do numero.
+
+_x1, _y1, _x2, _y2 = cd.PRECO_COMPRA
+_ench4 = cd.ench_compra(4)
+
+checar('a opcao do encantamento 4 fica dentro da regiao do preco',
+       _x1 <= _ench4['x'] <= _x2 and _y1 <= _ench4['y'] <= _y2, str(_ench4))
+
+
+class FaixaDoDropdown:
+    """A faixa de deteccao de um dropdown, um quadro por captura."""
+
+    FECHADA = bytes(64)
+    ABERTA = bytes([200]) * 64
+    FECHANDO = bytes([100]) * 64    # meio da animacao: nem aberta nem fechada
+
+    def __init__(self, abre=True, clique_pega=True, quadros_fechando=4):
+        self.estado = 'fechada'
+        self.abre = abre
+        self.clique_pega = clique_pega
+        self.quadros = quadros_fechando
+        self.faltam = 0
+        self.cliques = []
+
+    def clicar(self, pos, espera=None):
+        self.cliques.append((pos['x'], pos['y']))
+
+        if pos == cd.CMP_BARRA_ENCH:
+            if self.abre and self.estado == 'fechada':
+                self.estado = 'aberta'
+        elif pos == cd.MOUSE_DESCANSO:
+            self.estado = 'fechada'
+        elif self.estado == 'aberta' and self.clique_pega:
+            self.estado, self.faltam = 'fechando', self.quadros
+
+    def assinatura(self, regiao):
+        if self.estado == 'fechando':
+            self.faltam -= 1
+            if self.faltam <= 0:
+                self.estado = 'fechada'
+            return self.FECHANDO
+        return self.ABERTA if self.estado == 'aberta' else self.FECHADA
+
+
+def _com_faixa(faixa, acao):
+
+    reais = (comum.clicar, comum.apontar, comum.assinatura, filtros.ESPERA_DROPDOWN)
+
+    comum.clicar = faixa.clicar
+    comum.apontar = lambda pos: None
+    comum.assinatura = faixa.assinatura
+    filtros.ESPERA_DROPDOWN = 0.5
+
+    try:
+        return acao()
+    finally:
+        (comum.clicar, comum.apontar, comum.assinatura, filtros.ESPERA_DROPDOWN) = reais
+
+
+_faixa = FaixaDoDropdown()
+_ok = _com_faixa(_faixa, lambda: filtros.escolher(cd.CMP_BARRA_ENCH, cd.ench_compra(2)))
+
+checar('so devolve depois de a animacao de fechar terminar',
+       _ok is True and _faixa.estado == 'fechada', f'{_ok} {_faixa.estado}')
+
+_faixa = FaixaDoDropdown(clique_pega=False)
+_opcao = cd.ench_compra(2)
+_ok = _com_faixa(_faixa, lambda: filtros.escolher(cd.CMP_BARRA_ENCH, _opcao))
+
+checar('lista que nao fecha: tenta de novo, fechando no vazio entre uma e outra',
+       _ok is False
+       and _faixa.cliques.count((_opcao['x'], _opcao['y'])) == filtros.TENTATIVAS_DE_OPCAO
+       and _faixa.cliques.count((cd.MOUSE_DESCANSO['x'], cd.MOUSE_DESCANSO['y']))
+       == filtros.TENTATIVAS_DE_OPCAO,
+       str(_faixa.cliques))
+
+checar('e no fim a lista fica fechada, sem nada por cima do preco',
+       _faixa.estado == 'fechada' and comum.contador('filtro_nao_aplicado') == 1)
+
+_faixa = FaixaDoDropdown(abre=False)
+_ok = _com_faixa(_faixa, lambda: filtros.escolher(cd.CMP_BARRA_ENCH, _opcao))
+
+checar('lista que nao abriu: a opcao nao e clicada, porque ali embaixo esta a oferta',
+       _ok is False and (_opcao['x'], _opcao['y']) not in _faixa.cliques,
+       str(_faixa.cliques))
+
+# o trocar() nao espera o preco mudar quando a escolha falhou
+_faixa = FaixaDoDropdown(clique_pega=False)
+_t0 = time.monotonic()
+_r = _com_faixa(_faixa, lambda: filtros.encantamento(2))
+
+checar('filtro que nao entrou volta NAO_APLICADO, sem gastar a espera do preco',
+       _r == filtros.NAO_APLICADO and time.monotonic() - _t0 < filtros.ESPERA_PRECO,
+       f'{_r} em {time.monotonic() - _t0:.1f}s')
+
+comum.zerar_contadores()
+
+
+# --- e quem le nao le a combinacao cujo filtro nao entrou ------------------
+class TelaQueFalhaUmaVez:
+    """Uma tela em que a primeira troca para o encantamento 2 nao entra."""
+
+    regiao = cd.PRECO_COMPRA
+
+    def __init__(self):
+        self.encantamentos = []
+        self.falhar = {2}
+
+    def abrir(self, item):
+        return True, ''
+
+    def fechar(self):
+        pass
+
+    def base(self):
+        return 1000
+
+    def ler(self, anterior):
+        return (anterior or 1000) + 100
+
+    def vazio(self):
+        return False
+
+    def outro_preco(self):
+        return None
+
+    def encantamento(self, ench):
+        self.encantamentos.append(ench)
+        if ench in self.falhar:
+            self.falhar.discard(ench)
+            return filtros.NAO_APLICADO
+        return True
+
+    def grau(self, item, grau, ench):
+        return True
+
+
+_tela = TelaQueFalhaUmaVez()
+_lidos = conferidor.ler_item('Thetford', 'Broadsword', [(5, 2), (6, 2)], _tela)
+
+checar('a combinacao cujo filtro nao entrou fica sem preco',
+       _lidos[0] == ('T5.2', None, None), str(_lidos))
+
+checar('e a seguinte repoe o encantamento, mesmo sendo o mesmo',
+       _tela.encantamentos == [2, 2] and _lidos[1][0] == 'T6.2' and _lidos[1][1],
+       f'{_tela.encantamentos} {_lidos}')
+
+comum.zerar_contadores()
+
+
 checar('a ordem e do mais fraco para o mais forte',
        conferidor.COMBINACOES == sorted(conferidor.COMBINACOES),
        str(conferidor.COMBINACOES[:3]))
@@ -3731,6 +3885,23 @@ _r, _ = _com_loja(Loja({'Broadsword': [(900, 2)]}, dialogo_mente={'Broadsword': 
                                                   'Thetford', 0.2, lucro.TAXA_PADRAO))
 
 checar('e o mesmo valor passa quando a venda e na hora', _r['unidades'] == 2, str(_r))
+
+
+# FILTRO QUE NAO ENTROU E COMPRA DE OUTRA COMBINACAO: o livro na tela seria o do
+# grau de antes, julgado pela venda deste
+class _LojaSemFiltro(Loja):
+
+    def encantamento(self, valor):
+        return filtros.NAO_APLICADO
+
+
+_loja_sf = _LojaSemFiltro({'Broadsword': [(900, 2)]})
+_r, _reg = _com_loja(_loja_sf, lambda: comprador.comprar_linha(
+    _linha('Broadsword', 'T6.0', 900, 2000, 2), 'Thetford', 0.2, lucro.TAXA_PADRAO))
+
+checar('filtro que nao entrou nao vira compra',
+       _r['unidades'] == 0 and not _reg and not _loja_sf.compradas
+       and 'filtro' in _r['motivo'], str(_r))
 
 # --- o piso ----------------------------------------------------------------
 checar('com o "perto" padrao, o piso e 95% do alvo',

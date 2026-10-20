@@ -149,11 +149,17 @@ def comprar_linha(linha, origem, margem, taxa, gasto_ate_agora=0,
     painel = False
 
     try:
-        filtros.encantamento(ench)
-        filtros.grau(grau)
+        aplicados = [filtros.encantamento(ench), filtros.grau(grau)]
 
         if qualidade:
-            filtros.qualidade(qualidade)
+            aplicados.append(filtros.qualidade(qualidade))
+
+        # FILTRO QUE NAO ENTROU E COMPRA DE OUTRA COMBINACAO: o livro na tela
+        # seria o do grau de antes, julgado pela venda deste
+        if filtros.NAO_APLICADO in aplicados:
+            saida['motivo'] = 'o filtro de grau ou encantamento nao foi aplicado'
+            comum.contar('linhas_sem_filtro')
+            return saida
 
         # O LIVRO DE AGORA, e nao o da varredura. A lista foi montada com precos
         # de antes, e o mercado nao esperou.

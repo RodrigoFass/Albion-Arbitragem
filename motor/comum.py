@@ -1380,6 +1380,40 @@ def esperar_mudanca(regiao, antes, limite):
     return False
 
 
+def parecido(a, b, tolerancia=0.03):
+    """True quando duas assinaturas da mesma regiao mostram quase a mesma coisa.
+
+    Igualdade byte a byte nao serve para perguntar "a tela VOLTOU a ser o que
+    era": um pixel de antialiasing ou de brilho animado no fundo ja a derruba.
+    Conta os bytes que mudaram de verdade (mais de 24 tons) e aceita ate
+    <tolerancia> deles - uma lista de dropdown aberta muda bem mais que isso."""
+
+    if len(a) != len(b) or not a:
+        return a == b
+
+    diferentes = sum(1 for x, y in zip(a, b) if abs(x - y) > 24)
+
+    return diferentes / len(a) <= tolerancia
+
+
+def esperar_parecido(regiao, alvo, limite, tolerancia=0.03):
+    """Espera a regiao voltar a parecer com <alvo>. True se voltou."""
+
+    fim = time.monotonic() + limite
+
+    while True:
+
+        checar_aborto()
+
+        if parecido(assinatura(regiao), alvo, tolerancia):
+            return True
+
+        if time.monotonic() >= fim:
+            return False
+
+        time.sleep(SONDAGEM_LENTA)
+
+
 def esperar_estavel(regiao, limite, exigidas=None, intervalo=None):
     """Espera a regiao parar de mudar, ou seja, a animacao terminar.
 

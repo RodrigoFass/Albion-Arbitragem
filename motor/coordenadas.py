@@ -381,6 +381,11 @@ CMP_SEM_OFERTAS = (840, 450, 1060, 498)
 # trocas - depender de qual opcao foi clicada seria guardar uma excecao que
 # ninguem lembra ao mexer nas coordenadas.
 #
+# E A LISTA ABERTA COBRE O PRECO INTEIRO. O jogo ganhou a opcao "Enchantment 4",
+# em (1100, 433): com a lista de encantamento aberta ela fica em cima de toda a
+# regiao do preco. Por isso filtros.escolher so devolve depois de a lista fechar
+# de verdade.
+#
 # ESTE PONTO PRECISA SER VAZIO, E A LINHA DOS FILTROS NAO E.
 #
 # A primeira versao punha o cursor em (1240, 270) - "entre o encantamento e o

@@ -465,11 +465,11 @@ class Cidade:
         return None
 
     def encantamento(self, ench):
-        filtros.encantamento(ench)
+        return filtros.encantamento(ench)
 
     def grau(self, item, grau, ench):
-        filtros.grau(grau)
-        return True
+        # a lista que nao fechou e evidencia de que o grau nao e o pedido
+        return filtros.grau(grau) != filtros.NAO_APLICADO
 
 
 CIDADE = Cidade()
@@ -522,12 +522,23 @@ def ler_item(local, item, combinacoes, tela=None):
             # DEPOIS dele - um anterior seria de outra combinacao ou de outra hora
             trocou_em = escuta.marca()
 
+            rotulo = mercado.rotulo(grau, ench)
+
             if ench != ench_atual:
 
                 # O ENCANTAMENTO VEM PRIMEIRO: no Mercado Negro ele define onde a
                 # lista de graus comeca, entao a posicao do grau so pode ser
                 # calculada depois dele estar posto.
-                tela.encantamento(ench)
+                if tela.encantamento(ench) == filtros.NAO_APLICADO:
+                    # A LISTA NAO FECHOU, ou nem abriu: na tela esta o texto do
+                    # dropdown, ou o encantamento de antes. A combinacao fica sem
+                    # preco - a repescagem do fim tenta de novo - e a seguinte
+                    # repoe os dois filtros.
+                    ench_atual = grau_atual = None
+                    comum.contar('combinacoes_sem_filtro')
+                    lidos.append((rotulo, None, None))
+                    continue
+
                 ench_atual = ench
 
                 # QUANDO OS DOIS FILTROS MUDAM, a base tem de ser relida AQUI.
@@ -540,8 +551,6 @@ def ler_item(local, item, combinacoes, tela=None):
                 # qualquer" aqui aceitaria de volta o preco que acabou de sair.
                 if grau != grau_atual and not pela_rede:
                     anterior = tela.ler(anterior)
-
-            rotulo = mercado.rotulo(grau, ench)
 
             if grau != grau_atual:
 
@@ -957,6 +966,9 @@ def _resumo(r, erro_ao_salvar):
         ('opcao_sem_efeito',
          'cliques em opcao de filtro que nao fecharam a lista - se for muito, '
          'as coordenadas do dropdown sairam do lugar'),
+        ('combinacoes_sem_filtro',
+         'combinacoes SEM PRECO porque o filtro nao foi aplicado nem insistindo '
+         '- se for muito, calibre o dropdown em Ajustes > Leitura > Calibrar'),
         ('itens_sem_painel',
          'itens cujo painel de venda nao abriu'),
         ('itens_sem_menu',

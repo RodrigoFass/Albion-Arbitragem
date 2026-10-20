@@ -385,6 +385,18 @@ class Api:
         if pela_rede and pela_rede != local:
             extras.append(f'a rede diz que você está em {pela_rede}, e não em {local}')
 
+        # A REDE LIGADA E CALADA CAIA NO OCR SEM DIZER NADA. O albiondata-client
+        # so manda preco depois de descobrir onde voce esta, e ele descobre na
+        # troca de mapa; ate la a leitura e pela tela, mais lenta e mais sujeita
+        # a erro - e a pessoa achava que estava lendo pela rede.
+        if conf.get('rede_ativa') and not escuta.ativa():
+            extras.append('a leitura pela rede está ligada, mas nenhum preço está '
+                          'chegando por ela - a leitura vai pela tela (OCR), mais '
+                          'lenta e mais sujeita a erro. Se o albiondata-client '
+                          'acabou de abrir, troque de mapa ou relogue no jogo para '
+                          'ele descobrir onde você está; a situação aparece em '
+                          'Ajustes > Leitura')
+
         return self._rodar(trabalho, f'Lendo preços em {local}', forcar, extras)
 
     def restaurar_precos(self, local):

@@ -319,6 +319,13 @@ checar('e mercado que nao existe nao', not api.escolher_mercado('Narnia'))
 p = api.plano_varredura('Thetford', None, False)
 checar('o plano conta as combinacoes do catalogo', p['combinacoes'] > 1500, str(p))
 
+# A REDE LIGADA E CALADA CAIA NO OCR SEM DIZER NADA. Com problema na lista, a
+# leitura nao comeca sem a pessoa confirmar.
+r = api.varrer('Thetford')
+checar('com a rede ligada e sem preco chegando, a leitura avisa que vai pela tela',
+       not r.get('ok') and any('nenhum preço está chegando' in p
+                               for p in r.get('problemas', [])), str(r))
+
 
 # ============================================================
 grupo('a operacao')

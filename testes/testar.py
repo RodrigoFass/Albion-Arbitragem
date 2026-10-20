@@ -3017,6 +3017,65 @@ _r = _com_painel(_p, lambda: mercado_negro.escolher_grau(_fora, 8, 0))
 checar('a combinacao seguinte ja acerta de primeira',
        _r == 'ok' and _p.cliques == 1, f'{_r}, {_p.cliques} cliques')
 
+# --- o clique que cai FORA da lista ----------------------------------------
+# A LISTA ACABA NO GRAU 8. Supondo que a do Great Hammer comecava no 1, o bot
+# pedia a sexta opcao de uma lista de cinco: o clique caia no painel embaixo, o
+# rotulo continuava no grau de antes, e a conta pela diferenca nao saia do
+# lugar. Na varredura: o Great Hammer inteiro sem preco, e o bot "perdido".
+class PainelComFim(Painel):
+    """O painel de verdade: a lista acaba no 8, e o painel abre no primeiro grau."""
+
+    def __init__(self, base):
+        super().__init__(base)
+        self.grau = self._inicio()
+        self.opcoes = []
+
+    def escolher(self, barra, opcao, deteccao=None, afastar=True):
+        indice = (opcao['y'] - cd.VND_DROPDOWN_TOPO) // cd.VND_DROPDOWN_PASSO + 1
+
+        if barra['x'] == cd.VND_BARRA_TIER['x']:
+            self.opcoes.append(indice)
+            if self._inicio() + indice - 1 > 8:
+                self.cliques += 1
+                return              # fora da lista: nada muda
+
+        super().escolher(barra, opcao, deteccao, afastar)
+
+
+checar('a tabela de graus acha o item pelo nome do menu (Greathammer = Great Hammer)',
+       mercado_negro._base_da_tabela('Greathammer') == 4
+       and mercado_negro._base_da_tabela('Demon Cape') == 4
+       and mercado_negro._base_da_tabela('Bag') == 2)
+
+mercado_negro.esquecer_calibragem()
+_p = PainelComFim(base=4)
+_r = _com_painel(_p, lambda: mercado_negro.escolher_grau('Greathammer', 6, 0))
+
+checar('o Great Hammer acerta o T6 de primeira, na terceira opcao',
+       _r == 'ok' and _p.grau == 6 and _p.opcoes == [3], f'{_r} {_p.grau} {_p.opcoes}')
+
+# a tabela errada para um item: o clique cai fora, e a primeira opcao corrige
+mercado_negro.esquecer_calibragem()
+mercado_negro.graus_base()['Bloodletter'] = 1
+
+try:
+    _p = PainelComFim(base=4)
+    _r = _com_painel(_p, lambda: mercado_negro.escolher_grau('Bloodletter', 6, 0))
+finally:
+    del mercado_negro.graus_base()['Bloodletter']
+
+checar('clique fora da lista: le a primeira opcao e acerta o grau',
+       _r == 'ok' and _p.grau == 6 and 1 in _p.opcoes, f'{_r} {_p.grau} {_p.opcoes}')
+
+# item fora da tabela: le a primeira opcao ANTES, e nunca clica alem do fim
+mercado_negro.esquecer_calibragem()
+_p = PainelComFim(base=4)
+_r = _com_painel(_p, lambda: mercado_negro.escolher_grau('Bloodletter', 8, 0))
+
+checar('item sem tabela le o comeco antes e nunca clica fora da lista',
+       _r == 'ok' and _p.grau == 8 and _p.opcoes[0] == 1 and max(_p.opcoes) <= 5,
+       f'{_r} {_p.grau} {_p.opcoes}')
+
 # --- com encantamento a lista e truncada no grau 4 -------------------------
 mercado_negro.esquecer_calibragem()
 _p = Painel(base=1)

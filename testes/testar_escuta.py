@@ -108,6 +108,11 @@ q, _ = mercado.ler_qualidades('Thetford', 'Broadsword', 'T6.1')
 checar('cada qualidade guarda a sua', q.get(1, {}).get('oferta') == 12000
        and q.get(2, {}).get('oferta') == 11500, str(q))
 
+checar('na cidade o livro inteiro vai junto, com as quantidades, para a media',
+       mercado.ler_ofertas('Thetford', 'Broadsword', 'T6.1')
+       == [(11500, 2), (12000, 3), (13000, 5)],
+       str(mercado.ler_ofertas('Thetford', 'Broadsword', 'T6.1')))
+
 escuta.receber({'Orders': [
     ordem('T6_MAIN_SWORD@1', '3003', 30000, 1, 'offer'),
     ordem('T6_MAIN_SWORD@1', '3003', 25000, 4, 'request'),

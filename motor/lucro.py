@@ -200,6 +200,33 @@ def melhor_venda(oferta, pedido, taxa=TAXA_PADRAO):
     return preco, por_ordem
 
 
+def media_das_ofertas(ofertas, quantidade):
+    """O preco medio de comprar <quantidade> unidades das ofertas mais baratas.
+
+    A REFERENCIA DA CIDADE E ESTA MEDIA, e nao a primeira oferta. A primeira
+    pode ter uma unidade so: comprando dez, o custo de verdade e a media das dez
+    mais baratas, e uma oferta isolada la embaixo fazia a lista prometer uma
+    margem que so a primeira unidade pagava.
+
+    Com menos unidades no livro que a quantidade, e a media de todas. None sem
+    oferta nenhuma."""
+
+    falta = max(1, int(quantidade or 1))
+    total = unidades = 0
+
+    for preco, disponivel in sorted(ofertas or []):
+
+        leva = min(disponivel, falta)
+        total += preco * leva
+        unidades += leva
+        falta -= leva
+
+        if falta <= 0:
+            break
+
+    return round(total / unidades) if unidades else None
+
+
 def linha(item, rot, compra, venda, quantidade, taxa=TAXA_PADRAO,
           ordem_na_compra=True, ordem_na_venda=False):
     """Uma linha da lista de compras, com as duas margens e os totais.
@@ -266,9 +293,16 @@ def _linha_normal(item, rot, origem, destino, quantidade, taxa, idade_maxima,
     if venda is None:
         return None, 'sem_venda'
 
-    l = linha(item, rot, preco_compra, venda, quantidade, taxa,
+    # NA CIDADE, A MEDIA do livro ate a quantidade que voce compraria; sem o
+    # livro guardado (leituras antigas), a primeira oferta, como sempre foi
+    media = media_das_ofertas(mercado.ler_ofertas(origem, item, rot), quantidade)
+    compra = media if media is not None else preco_compra
+
+    l = linha(item, rot, compra, venda, quantidade, taxa,
               ordem_na_compra, por_ordem)
     l['qualidade'] = None
+    l['compra_por_media'] = media is not None
+    l['menor_oferta'] = preco_compra
 
     return l, None
 
@@ -416,10 +450,13 @@ def montar(catalogo, origem, destino=None, margem_minima=MARGEM_PADRAO,
                 continue
             if l['quantidade'] > livres:
                 qualidade = l.get('qualidade')
+                de_antes = {k: l[k] for k in ('compra_por_media', 'menor_oferta')
+                            if k in l}
                 l = linha(l['item'], l['combinacao'], l['compra'], l['venda'],
                           livres, taxa,
                           ordem_na_compra and not qualidade, l['venda_por_ordem'])
                 l['qualidade'] = qualidade
+                l.update(de_antes)
             cabem.append(l)
             livres -= l['quantidade']
 

@@ -231,6 +231,7 @@ class _Execucao:
     def zerar(self):
         self.veio_do_menu = False
         self.sondar_rede = False     # testar a rede na proxima combinacao
+        self.ofertas = {}            # rotulo -> livro de venda lido, do item atual
         self.bordas_salvas = 0
         self.onde = ''
         self.item = ''
@@ -465,6 +466,32 @@ class Cidade:
         # A tela de compra da cidade tem uma coluna de preco so.
         return None
 
+    def ofertas_visiveis(self, primeiro):
+        """As ofertas das linhas visiveis da lista: [(preco, 1)], da mais barata.
+
+        PELA TELA SO DA PARA LER O QUE ESTA A VISTA, e uma unidade por linha: a
+        quantidade fica no canto do icone, pequena demais para o OCR. E o que a
+        media da cidade tem quando a rede nao manda o livro inteiro.
+
+        Para na primeira linha que nao der para ler ou que nao fizer sentido: a
+        lista e ordenada do mais barato para o mais caro, entao um preco menor
+        que o da primeira linha - ou muito maior - e leitura errada."""
+
+        ofertas = [(primeiro, 1)]
+
+        for n in range(1, cd.LISTA_LINHAS):
+
+            preco = comum.ler_numero(cd.linha_preco(n))
+
+            if preco is None or not primeiro <= preco <= primeiro * FAIXA_MAX:
+                break
+
+            ofertas.append((preco, 1))
+
+        comum.contar('linhas_da_media_lidas', len(ofertas) - 1)
+
+        return ofertas
+
     def encantamento(self, ench):
         return filtros.encantamento(ench)
 
@@ -487,7 +514,10 @@ def ler_item(local, item, combinacoes, tela=None):
     duas precisam ler exatamente igual, e este e o unico jeito de garantir isso.
 
     <preco> None quer dizer que nao saiu numero - sem oferta, ou leitura que nao
-    se confirmou. As duas coisas sao separadas pelos contadores."""
+    se confirmou. As duas coisas sao separadas pelos contadores.
+
+    NA CIDADE, O LIVRO VAI JUNTO, em ATUAL.ofertas[rotulo]: pela rede inteiro,
+    pela tela as linhas visiveis. E dele que sai a media da lista de compras."""
 
     tela = _tela(tela)
 
@@ -495,6 +525,9 @@ def ler_item(local, item, combinacoes, tela=None):
     anterior = None
     grau_atual = None
     ench_atual = None
+
+    na_cidade = local != mercado.MERCADO_NEGRO
+    ATUAL.ofertas = {}
 
     try:
         for grau, ench in combinacoes:
@@ -603,6 +636,11 @@ def ler_item(local, item, combinacoes, tela=None):
                     preco, outro = rede
                     anterior = preco
                     comum.contar('combinacoes_pela_rede')
+
+                    # o pacote ja esta aqui: o livro inteiro sai sem esperar
+                    if na_cidade:
+                        ATUAL.ofertas[rotulo] = escuta.ofertas(
+                            local, item, rotulo, desde=trocou_em, prazo=0)
                     lidos.append((rotulo, preco, outro))
                     comum.avisar(f'{item} {rotulo}', comum.fmt(preco))
                     continue
@@ -630,6 +668,13 @@ def ler_item(local, item, combinacoes, tela=None):
             # A SEGUNDA COLUNA, NA MESMA PASSADA. So quando houve leitura -
             # nao adianta ler a outra coluna de uma combinacao que nao existe.
             outro = tela.outro_preco() if preco is not None else None
+
+            # AS OUTRAS LINHAS DA LISTA, para a media da cidade - so quem sabe
+            # le-las (a Cidade) e so quando a primeira saiu
+            visiveis = getattr(tela, 'ofertas_visiveis', None)
+
+            if na_cidade and preco is not None and visiveis is not None:
+                ATUAL.ofertas[rotulo] = visiveis(preco)
 
             lidos.append((rotulo, preco, outro))
 
@@ -701,7 +746,8 @@ def varrer_item(local, item, combinacoes=None, relatos=None, tela=None):
         # e ela acontece depois do item inteiro ter sido lido - avisar daqui
         # fazia os treze cartoes aparecerem de uma vez no fim, quando a tela do
         # jogo ja mudou treze vezes e nao ha mais o que conferir.
-        mercado.gravar(local, item, rotulo, preco, outro=outro)
+        mercado.gravar(local, item, rotulo, preco, outro=outro,
+                       ofertas=ATUAL.ofertas.get(rotulo))
         gravados += 1
 
     # AS TREZE LEITURAS NUMA LINHA SO. O que se procura aqui nao e um numero

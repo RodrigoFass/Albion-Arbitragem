@@ -336,7 +336,12 @@
       { chave: 'combinacao', titulo: 'Combinação' },
       { chave: 'qualidade', titulo: 'Qualidade', formato: (v) => v ? h('span', { class: 'selo destaque' }, nomeDaQualidade(v)) : h('span', { class: 'fraquissimo' }, 'qualquer') },
       { chave: 'quantidade', titulo: 'Quant.', direita: true, formato: fmt },
-      { chave: 'compra', titulo: 'Compra', direita: true, formato: fmt },
+      // na cidade, a media das ofertas ate a quantidade da linha; a menor
+      // oferta fica no balao, para conferir com o jogo
+      { chave: 'compra', titulo: 'Compra', direita: true,
+        formato: (v, l) => l.compra_por_media
+          ? h('span', { title: `menor oferta: ${fmt(l.menor_oferta)}` }, fmt(v), h('span', { class: 'fraquissimo' }, ' · média'))
+          : fmt(v) },
       // o caminho da venda que a conta usou: o pedido de compra (na hora) ou uma
       // prata abaixo da fila (por ordem, com os 2,5% a mais)
       { chave: 'venda', titulo: 'Venda', direita: true,

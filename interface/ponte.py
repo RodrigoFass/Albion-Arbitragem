@@ -40,6 +40,7 @@ from motor import historico
 from motor import lucro
 from motor import mercado
 from motor import mercado_negro
+from motor import republicar
 from motor import vendedor
 
 TITULO = 'Albion Arbitragem'
@@ -645,6 +646,18 @@ class Api:
             'horas': vendedor.HORAS_DA_CARGA,
             'do_dia': do_dia,
         }
+
+    def vender_pelo_mercado(self, de_verdade=False, forcar=False):
+        """Cria a ordem de cada pilha da lista "Sell from Inventory".
+
+        SEM DEPENDER DA COMPRA: o preco e o menor da qualidade Normal no Mercado
+        Negro, menos uma prata - ver republicar.py."""
+
+        return self._rodar(
+            lambda: republicar.vender(de_verdade=de_verdade),
+            ('Vendendo pelo mercado' if de_verdade
+             else 'Simulando a venda pelo mercado'),
+            forcar)
 
     def vender(self, de_verdade=False, forcar=False):
         """Vende a carga do ultimo calculo no Mercado Negro."""

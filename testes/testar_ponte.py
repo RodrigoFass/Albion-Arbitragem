@@ -249,6 +249,22 @@ checar('e o previsto e liquido de taxa',
        str(l))
 
 
+# A VENDA PELO MERCADO NAO DEPENDE DA COMPRA, e passa pelo mesmo portao das
+# outras operacoes - NUNCA com o ambiente de verdade, que com o jogo aberto
+# comecaria a vender de fato
+_verificar_real, _focar_real = comum.verificar_ambiente, comum.focar_jogo
+comum.verificar_ambiente = lambda exigir_foco: ['jogo fechado (teste)']
+comum.focar_jogo = lambda: False
+
+try:
+    r = api.vender_pelo_mercado(True)
+finally:
+    comum.verificar_ambiente, comum.focar_jogo = _verificar_real, _focar_real
+
+checar('e passa pelo portao do jogo pronto, como as outras operacoes',
+       r.get('problemas') == ['jogo fechado (teste)'] and api._rodando is None, str(r))
+
+
 # ============================================================
 grupo('o historico')
 

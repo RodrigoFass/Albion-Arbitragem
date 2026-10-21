@@ -80,16 +80,37 @@ VND_DETECCAO_MEIA_ALTURA = 11
 
 #endregion
 
-#region Republicacao (bot Vender)
+#region Vender pelo mercado (o filtro de qualidade do painel)
 
-# O painel de venda do proprio item, diferente da lista de pedidos acima.
-VER_VENDER_1 = {'x': 1275, 'y': 435}   # botao "Vender" do item
-VER_VENDER_2 = {'x': 880,  'y': 735}   # CONFIRMAR a venda
-VER_BUSCA    = {'x': 820,  'y': 400}
-VER_NORMAL   = {'x': 820,  'y': 430}   # filtro de qualidade
-VER_PRECO    = {'x': 655,  'y': 640}   # campo de preco
-VER_DIMINUIR = {'x': 560,  'y': 640}   # botao de diminuir 1 de prata
-VER_FECHAR   = {'x': 937,  'y': 310}   # fechar o painel
+# MEDIDO num print do jogo em 1920x1080: o painel de pedido de venda de um
+# "Grandmaster's Hoarfrost Staff" de qualidade Good. A barra do painel tem grau,
+# encantamento, qualidade e o botao de restaurar, todos em y=396.
+#
+# O filtro de qualidade COMPARA versoes do item - "Use the filters below to
+# compare different versions of the same item" -, e o restaurar volta o painel a
+# versao que esta na mochila. Por isso a venda le o preco da Normal e restaura
+# antes de criar a ordem.
+VND_BARRA_QUAL = {'x': 825, 'y': 396}
+VND_RESTAURAR = {'x': 921, 'y': 396}
+
+# O texto do filtro de qualidade ("Good", "Normal"), sem a seta da direita. So
+# o miolo claro da caixa: a borda escura em cima e embaixo virava lixo no OCR.
+VND_QUAL_ROTULO = (764, 389, 862, 404)
+
+# A opcao Normal, a primeira da lista de qualidade aberta. Do bot antigo, que
+# republicava por este mesmo painel (820, 430); a troca e conferida depois do
+# clique, pela fila de precos e pelo rotulo.
+VND_QUAL_NORMAL = {'x': 825, 'y': 430}
+
+# O numero do campo de preco DESTE painel, para conferir o que foi digitado.
+#
+# O CAMPO EM EDICAO E OUTRO DESENHO: some o icone da moeda, somem as virgulas,
+# e o numero comeca em x~605, logo depois da borda do campo (x~596). Um recorte
+# a partir de 617 - pensado para pular a moeda - cortava o primeiro digito:
+# 229789 digitado, "19789" lido, e o Create nunca era clicado; a partir de 604,
+# o digito ficava colado na borda (dados/registros/falhas_venda_mochila).
+# Termina antes da etiqueta verde "% above average", que comeca em x=705.
+VND_PRECO_VALOR = (599, 619, 703, 641)
 
 #endregion
 
@@ -525,28 +546,38 @@ PASSOS = [
         ],
     },
     {
-        'titulo': 'Painel de republicar a venda',
-        'preparo': 'Deixe na tela o painel em que você republica um item à venda: '
-                   'o que tem o campo de preço e o botão de diminuir.',
+        'titulo': 'Qualidade no painel de pedido de venda',
+        'preparo': 'Clique em "Vender" num item que NÃO seja Normal e escolha '
+                   '"Pedido de venda" (Sell Order). Deixe o painel aberto, sem '
+                   'nenhuma lista de opções aberta.',
         'marcas': [
-            {'nome': 'VER_VENDER_1', 'tipo': 'ponto',
-             'o_que': 'o botão "Vender" do item'},
-            {'nome': 'VER_BUSCA', 'tipo': 'ponto',
-             'o_que': 'o campo de busca deste painel'},
-            {'nome': 'VER_NORMAL', 'tipo': 'ponto',
-             'o_que': 'o filtro de qualidade Normal',
-             'dica': 'Normal é a qualidade mais barata, e portanto a que define '
-                     'o preço a ser batido.'},
-            {'nome': 'VER_PRECO', 'tipo': 'ponto',
-             'o_que': 'o campo onde se digita o preço'},
-            {'nome': 'VER_DIMINUIR', 'tipo': 'ponto',
-             'o_que': 'o botão que diminui 1 de prata'},
-            {'nome': 'VER_FECHAR', 'tipo': 'ponto',
-             'o_que': 'o X que fecha este painel'},
-            {'nome': 'VER_VENDER_2', 'tipo': 'ponto',
-             'o_que': 'o botão que confirma a venda',
-             'dica': 'Se ele só aparece depois de clicar em Vender, deixe a '
-                     'confirmação aberta antes de capturar.'},
+            {'nome': 'VND_BARRA_QUAL', 'tipo': 'ponto',
+             'o_que': 'a caixa do filtro de qualidade, fechada'},
+            {'nome': 'VND_QUAL_ROTULO', 'tipo': 'regiao',
+             'o_que': 'o texto da qualidade dentro da caixa ("Good", "Normal")',
+             'dica': 'Só a palavra, sem a seta da direita.'},
+            {'nome': 'VND_RESTAURAR', 'tipo': 'ponto',
+             'o_que': 'o botão redondo de restaurar, à direita dos filtros',
+             'dica': 'É ele que volta o painel à versão do item que está na '
+                     'mochila, depois de olhar o preço da Normal.'},
+            {'nome': 'PAINEL_PRECO_CAMPO', 'tipo': 'ponto',
+             'o_que': 'o campo do preço, no meio do número'},
+            {'nome': 'VND_PRECO_VALOR', 'tipo': 'regiao',
+             'o_que': 'o número do preço dentro do campo',
+             'dica': 'Só os dígitos: sem o ícone da moeda à esquerda e sem a '
+                     'etiqueta "% above average".'},
+            {'nome': 'PAINEL_CRIAR', 'tipo': 'ponto',
+             'o_que': 'o botão "Create" (Criar)'},
+        ],
+    },
+    {
+        'titulo': 'Lista de qualidades aberta',
+        'preparo': 'No mesmo painel, clique no filtro de qualidade para abrir a '
+                   'lista. Deixe-a aberta.',
+        'marcas': [
+            {'nome': 'VND_QUAL_NORMAL', 'tipo': 'ponto',
+             'o_que': 'a opção "Normal"',
+             'dica': 'É o preço da Normal que a venda pelo mercado bate.'},
         ],
     },
     {

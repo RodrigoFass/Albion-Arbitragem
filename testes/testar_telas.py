@@ -246,7 +246,9 @@ def rodar():
         grupo('Calibrador')
 
         passos = calibrador.evaluate_js("document.querySelectorAll('#grupos button').length")
-        checar('os grupos de marcas', passos == 9, str(passos))
+        # 10: o painel de republicar do bot antigo virou dois grupos - a
+        # qualidade no painel de pedido de venda, e a lista de qualidades aberta
+        checar('os grupos de marcas', passos == 10, str(passos))
         preparo = calibrador.evaluate_js("document.getElementById('preparo').textContent")
         checar('o preparo do grupo atual', (preparo or '').startswith('Antes de capturar: '), repr(preparo))
 

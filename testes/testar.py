@@ -1989,8 +1989,8 @@ checar('e o de nome ambiguo vai SO pelo menu',
 checar('um caminho por item, nunca os dois',
        not (_jogo.pelo_menu and _jogo.buscados))
 
-checar('sao 18 assim entre os 252, o resto vai pela busca',
-       len(categorias.ambiguos()) == 18, str(len(categorias.ambiguos())))
+checar('sao 19 assim entre os 252 (18 de nome contido e o Halberd), o resto pela busca',
+       len(categorias.ambiguos()) == 19, str(len(categorias.ambiguos())))
 
 # --- o "Travertine": a base tirada no meio do redesenho ---------------------
 # Zerar a busca faz a lista voltar ao mercado inteiro, e o primeiro item dele em
@@ -3187,8 +3187,13 @@ grupo('o Mercado Negro: busca ou menu')
 # A busca do jogo devolve tudo que contem o que voce digitou. "Cursed Staff"
 # traz o "Great Cursed Staff" junto; "Bow" traz Crossbow, Warbow e mais seis.
 
-checar('sao 18 itens ambiguos entre os 252',
-       len(categorias.ambiguos()) == 18, str(len(categorias.ambiguos())))
+checar('sao 19 itens ambiguos entre os 252 (18 de nome contido e o Halberd)',
+       len(categorias.ambiguos()) == 19, str(len(categorias.ambiguos())))
+
+# NOS GRAUS SEM ENCANTAMENTO A BUSCA DO HALBERD TRAZ OUTRO ITEM NA FRENTE: a
+# varredura de Lymhurst voltava vazia no T6.0, T7.0 e T8.0 dele
+checar('o Halberd vai sempre pelo menu, mesmo sem nome contido em outro',
+       categorias.ambiguo('Halberd'))
 
 checar('o simples e ambiguo, o composto nao',
        categorias.ambiguo('Cursed Staff')
@@ -4558,6 +4563,360 @@ finally:
 
 checar('pela tela, as linhas visiveis entram na media ate a primeira sem sentido',
        _vis == [(1000, 1), (1100, 1), (1250, 1)], str(_vis))
+
+
+# ============================================================
+grupo('vender a mochila pelo mercado')
+
+# SEM DEPENDER DA COMPRA. A aba Vender so conhecia o que o bot comprou; agora o
+# que estiver na mochila vira ordem uma prata abaixo do menor preco da Normal.
+from motor import republicar   # noqa: E402
+
+# O "Total" do print do jogo: 4 x 229.798 menos 4% de taxa
+checar('a quantidade sai do Total do painel, com a taxa de Premium',
+       republicar.unidades_do_total(882_424, 229_798) == (4, lucro.TAXA_COM_PREMIUM),
+       str(republicar.unidades_do_total(882_424, 229_798)))
+
+checar('e sem Premium tambem',
+       republicar.unidades_do_total(int(4 * 229_798 * 0.92), 229_798)
+       == (4, lucro.TAXA_SEM_PREMIUM))
+
+
+class PainelDeVenda:
+    """O painel de pedido de venda do Mercado Negro, com o filtro de qualidade."""
+
+    def __init__(self, qualidade='Good', proprio=229_798, normal=210_000,
+                 unidades=4, filtro_obedece=True, restaura=True,
+                 rotulo_legivel=True, campo_confere=True):
+        self.da_mochila = qualidade
+        self.mostrada = qualidade
+        self.precos = {'proprio': proprio, 'normal': normal}
+        self.unidades = unidades
+        self.filtro_obedece = filtro_obedece
+        self.restaura = restaura
+        self.rotulo_legivel = rotulo_legivel
+        self.campo_confere = campo_confere
+        self.passos = []
+        self.digitado = None
+
+    def _preco_mostrado(self):
+        return self.precos['normal' if self.mostrada == 'Normal' else 'proprio']
+
+    def clicar(self, pos, espera=None):
+        if pos == cd.VND_RESTAURAR:
+            self.passos.append('restaurar')
+            if self.restaura:
+                self.mostrada = self.da_mochila
+        elif pos == cd.PAINEL_CRIAR:
+            self.passos.append('criar')
+        elif pos == cd.BM_PEDIDO_DE_VENDA:
+            self.passos.append('pedido de venda')
+
+    def escolher(self, barra, opcao, deteccao=None, afastar=True):
+        self.passos.append('qualidade')
+        if self.filtro_obedece and opcao == cd.VND_QUAL_NORMAL:
+            self.mostrada = 'Normal'
+        return True
+
+    def trocar(self, acao, regiao=None):
+        antes = self._preco_mostrado()
+        if acao() is False:
+            return filtros.NAO_APLICADO
+        return self._preco_mostrado() != antes
+
+    def ler_texto(self, regiao):
+        if tuple(regiao) == tuple(cd.VND_QUAL_ROTULO) and self.rotulo_legivel:
+            return self.mostrada
+        return ''
+
+    def ler_numero(self, regiao):
+        if tuple(regiao) == tuple(cd.PRECO_VENDA):
+            return self._preco_mostrado()
+        if tuple(regiao) == tuple(cd.PAINEL_TOTAL) and self.digitado:
+            return int(self.digitado * self.unidades * (1 - lucro.TAXA_COM_PREMIUM))
+        return None
+
+    def ler_numero_novo(self, regiao, anterior):
+        valor = self.ler_numero(regiao)
+        return None if valor == anterior else valor
+
+    def preencher(self, campo, regiao, valor):
+        self.passos.append('preco')
+        self.regiao_conferida = regiao
+        if not self.campo_confere:
+            return False
+        self.digitado = valor
+        return True
+
+
+def _listar_com(painel, de_verdade=True):
+
+    reais = (comum.clicar, comum.esperar_estavel, comum.ler_texto, comum.ler_numero,
+             comum.ler_numero_novo, filtros.trocar, filtros.escolher, republicar.preencher_preco,
+             historico.registrar, comum.avisar, comum.salvar_diagnostico)
+
+    gravadas = []
+    comum.clicar = painel.clicar
+    comum.esperar_estavel = lambda *a, **k: True
+    comum.ler_texto = painel.ler_texto
+    comum.ler_numero = painel.ler_numero
+    comum.ler_numero_novo = painel.ler_numero_novo
+    filtros.trocar = painel.trocar
+    filtros.escolher = painel.escolher
+    republicar.preencher_preco = (
+        lambda preco: painel.preencher(cd.PAINEL_PRECO_CAMPO, cd.VND_PRECO_VALOR, preco))
+    historico.registrar = lambda *a, **k: (gravadas.append((a, k)), (True, ''))[1]
+    comum.avisar = lambda *a, **k: None
+    comum.salvar_diagnostico = lambda *a, **k: painel.passos.append('diagnostico')
+
+    try:
+        return republicar.listar_aberto('Hoarfrost Staff', de_verdade), gravadas
+    finally:
+        (comum.clicar, comum.esperar_estavel, comum.ler_texto, comum.ler_numero,
+         comum.ler_numero_novo, filtros.trocar, filtros.escolher, republicar.preencher_preco,
+         historico.registrar, comum.avisar, comum.salvar_diagnostico) = reais
+        comum.zerar_contadores()
+
+
+# o caso do print: um Good, com a Normal mais barata na fila
+_p = PainelDeVenda()
+_r, _gravadas = _listar_com(_p)
+
+checar('item Good: a ordem sai 1 prata abaixo do menor preco da Normal',
+       _r['ok'] and _p.digitado == 209_999, f'{_r} digitado {_p.digitado}')
+
+checar('lendo a Normal e RESTAURANDO o painel antes de digitar o preco',
+       _p.passos == ['pedido de venda', 'qualidade', 'restaurar', 'preco', 'criar'],
+       str(_p.passos))
+
+checar('com a pilha inteira, e vai para o historico como ordem',
+       _r['unidades'] == 4 and _gravadas
+       and _gravadas[0][0][1] == mercado.MERCADO_NEGRO and _gravadas[0][0][6] == historico.ORDEM,
+       f'{_r} {_gravadas}')
+
+_p = PainelDeVenda(qualidade='Normal', proprio=229_798, normal=229_798)
+_r, _ = _listar_com(_p)
+
+checar('item Normal: nao mexe no filtro, e a ordem sai 1 abaixo do proprio preco',
+       _r['ok'] and _p.digitado == 229_797 and 'qualidade' not in _p.passos, str(_p.passos))
+
+_p = PainelDeVenda(normal=None)
+_r, _ = _listar_com(_p)
+
+checar('ninguem vendendo Normal: vale o menor preco da propria qualidade',
+       _r['ok'] and _p.digitado == 229_797, f'{_r} digitado {_p.digitado}')
+
+checar('o preco digitado e conferido no recorte sem o icone da moeda',
+       _p.regiao_conferida == cd.VND_PRECO_VALOR, str(_p.regiao_conferida))
+
+# O CASO DO JOGO: o filtro foi para Normal, mas o OCR nao leu a palavra
+_p = PainelDeVenda(rotulo_legivel=False)
+_r, _ = _listar_com(_p)
+
+checar('rotulo ilegivel: a fila mudando confirma a Normal, e a ordem sai',
+       _r['ok'] and _p.digitado == 209_999
+       and _p.passos == ['pedido de venda', 'qualidade', 'restaurar', 'preco', 'criar'],
+       f'{_r} {_p.passos}')
+
+_p = PainelDeVenda(rotulo_legivel=False, restaura=False)
+_r, _ = _listar_com(_p)
+
+checar('e com o rotulo ilegivel, a fila presa na Normal acusa o painel sem restaurar',
+       not _r['ok'] and 'criar' not in _p.passos, str(_r))
+
+_p = PainelDeVenda(filtro_obedece=False)
+_r, _ = _listar_com(_p)
+
+checar('filtro que nao foi para Normal: vai pelo preco da propria qualidade',
+       _r['ok'] and _p.digitado == 229_797 and 'restaurar' in _p.passos,
+       f'{_r} {_p.passos}')
+
+_p = PainelDeVenda(campo_confere=False)
+_r, _ = _listar_com(_p)
+
+
+
+def _campo_com(leituras):
+    """preencher_preco() com o campo de mentira: <leituras> e o que o OCR ve."""
+
+    fila = list(leituras)
+    feito = {'digitado': [], 'regioes': set()}
+    reais = (comum.clicar, comum.limpar_campo, comum.digitar, comum.capturar,
+             comum.checar_aborto, republicar.ler_campo_da_imagem,
+             republicar.ESPERA_ENTRE_LEITURAS)
+
+    def capturar(regiao):
+        feito['regioes'].add(tuple(regiao))
+        return None
+
+    comum.clicar = lambda *a, **k: None
+    comum.limpar_campo = lambda: None
+    comum.digitar = feito['digitado'].append
+    comum.capturar = capturar
+    comum.checar_aborto = lambda: None
+    republicar.ler_campo_da_imagem = lambda bruta: fila.pop(0) if fila else [None]
+    republicar.ESPERA_ENTRE_LEITURAS = 0
+
+    try:
+        return republicar.preencher_preco(229_789), feito
+    finally:
+        (comum.clicar, comum.limpar_campo, comum.digitar, comum.capturar,
+         comum.checar_aborto, republicar.ler_campo_da_imagem,
+         republicar.ESPERA_ENTRE_LEITURAS) = reais
+        comum._ultima_imagem = None
+        comum.zerar_contadores()
+
+
+# O CASO DO JOGO: digitado 229789, e o recorte que cortava o primeiro digito lia
+# "19789"; o cursor de texto aceso pode virar um digito a mais
+_ok, _feito = _campo_com([[2_297_189, None, 2_297_189], [19_789, 229_789, None]])
+
+checar('o cursor piscando nao faz redigitar: le de novo e confere',
+       _ok and _feito['digitado'] == ['229789'], str(_feito))
+
+checar('basta um dos limiares bater com o digitado',
+       _ok, str(_feito))
+
+checar('e confere no recorte do painel do Mercado Negro',
+       _feito['regioes'] == {tuple(cd.VND_PRECO_VALOR)}, str(_feito['regioes']))
+
+_ok, _feito = _campo_com([[19_789]] * 40)
+
+checar('numero que nunca confere: redigita algumas vezes e desiste',
+       not _ok and len(_feito['digitado']) == compra.TENTATIVAS_DE_CAMPO, str(_feito))
+
+checar('o recorte do campo comeca antes do primeiro digito do numero em edicao',
+       cd.VND_PRECO_VALOR[0] < 605 and cd.VND_PRECO_VALOR[2] < 705, str(cd.VND_PRECO_VALOR))
+
+# OS PRINTS DO JOGO, com o tesseract de verdade. Salvos pelo diagnostico com
+# escala 6 a partir de x=604; aqui voltam ao tamanho da tela e ganham os 5 px
+# a esquerda que o recorte de x=599 tem.
+_campos = sorted(_glob.glob(_os.path.join(_PASTA_AMOSTRAS, 'campo_preco_*.png')))
+
+checar('as quatro amostras do campo de preco estao no lugar', len(_campos) == 4,
+       f'{len(_campos)} em {_PASTA_AMOSTRAS}')
+
+for _caminho in _campos:
+    _valor = int(_os.path.basename(_caminho).split('_')[2].split('.')[0])
+    _grande = _Img2.open(_caminho).convert('RGB')
+    _tela = _grande.resize((_grande.width // 6, _grande.height // 6), _Img2.LANCZOS)
+    _com_folga = _Img2.new('RGB', (_tela.width + 5, _tela.height),
+                           _tela.getpixel((_tela.width - 3, _tela.height // 2)))
+    _com_folga.paste(_tela, (5, 0))
+    _lidos = republicar.ler_campo_da_imagem(_com_folga)
+
+    checar(f'campo em edicao lido: {_os.path.basename(_caminho)}', _valor in _lidos,
+           str(_lidos))
+
+checar('preco que nao confere no campo: nada de Create, e fica o diagnostico',
+       not _r['ok'] and 'criar' not in _p.passos and 'diagnostico' in _p.passos
+       and 'nao entrou' in _r['motivo'], f'{_r} {_p.passos}')
+
+_p = PainelDeVenda(restaura=False)
+_r, _ = _listar_com(_p)
+
+checar('painel que nao voltou para a qualidade da mochila: nada de ordem',
+       not _r['ok'] and 'criar' not in _p.passos, str(_r))
+
+_p = PainelDeVenda()
+_r, _gravadas = _listar_com(_p, de_verdade=False)
+
+checar('simulando, le e calcula, mas nao digita nem cria',
+       _r['ok'] and _r['preco'] == 209_999 and 'preco' not in _p.passos
+       and 'criar' not in _p.passos and not _gravadas, str(_p.passos))
+
+# --- a mochila inteira: o Sell de cada linha da lista, sem pesquisar --------
+
+checar('o nome da linha vira o nome do catalogo, sem o grau',
+       republicar.item_da_linha("Grandmaster's Hoarfrost Staff") == 'Hoarfrost Staff',
+       republicar.item_da_linha("Grandmaster's Hoarfrost Staff"))
+
+checar('e o nome do menu volta para o da planilha',
+       republicar.item_da_linha("Master's Great Hammer") == 'Greathammer',
+       republicar.item_da_linha("Master's Great Hammer"))
+
+checar('com o lixo do OCR em volta do nome, como no jogo',
+       republicar.item_da_linha("a | Grandmaster's Spiked Gauntlets") == 'Spiked Gauntlets'
+       and republicar.item_da_linha("| 1 Grandmaster's Hoarfrost Staff\n=~") == 'Hoarfrost Staff'
+       and republicar.item_da_linha("r oy Grandmaster’s Brawler Gloves") == 'Brawler Gloves',
+       republicar.item_da_linha("| 1 Grandmaster's Hoarfrost Staff\n=~"))
+
+checar('item que nao reconhece fica com o texto lido',
+       republicar.item_da_linha('Coisa Estranha') == 'Coisa Estranha')
+
+
+def _mochila(linhas, de_verdade=True, falhar=()):
+    """vender() com uma lista "Sell from Inventory" de mentira.
+
+    <linhas> e o que a lista mostra, de cima para baixo; a pilha que vira ordem
+    sai, e a de baixo sobe. <falhar> sao os itens que nao viram ordem."""
+
+    lista = list(linhas)
+    clicadas = []
+    aberta = [None]
+    reais = (republicar.abrir_linha, republicar._nome_da_linha, republicar.listar_aberto,
+             mercado_negro.fechar_painel, comum.sem_foco, comum.jogo_em_foco,
+             comum.progresso, republicar.relatar)
+
+    def abrir(n):
+        clicadas.append(n)
+        aberta[0] = n
+        return n < len(lista)
+
+    def listar(item, de_verdade=True):
+        if item in falhar:
+            return {'ok': False, 'preco': None, 'unidades': 0, 'motivo': 'sem preco'}
+        if de_verdade:
+            lista.pop(aberta[0])
+        return {'ok': True, 'preco': 1000, 'unidades': 1, 'motivo': ''}
+
+    republicar.abrir_linha = abrir
+    republicar._nome_da_linha = lambda n: lista[n] if n < len(lista) else ''
+    republicar.listar_aberto = listar
+    mercado_negro.fechar_painel = lambda: None
+    comum.sem_foco = lambda: []
+    comum.jogo_em_foco = lambda: True
+    comum.progresso = lambda *a, **k: None
+    republicar.relatar = lambda *a, **k: None
+
+    try:
+        return republicar.vender(de_verdade), clicadas, lista
+    finally:
+        (republicar.abrir_linha, republicar._nome_da_linha, republicar.listar_aberto,
+         mercado_negro.fechar_painel, comum.sem_foco, comum.jogo_em_foco,
+         comum.progresso, republicar.relatar) = reais
+        comum.zerar_contadores()
+
+
+_r, _clicadas, _sobrou = _mochila(["Grandmaster's Hoarfrost Staff", "Elder's Bow",
+                                   "Expert's Claymore"])
+
+checar('cada linha vira uma ordem, e a lista esvazia',
+       _r['ordens'] == 3 and _r['puladas'] == 0 and not _sobrou, str(_r))
+
+checar('criada a ordem, a proxima e a mesma linha - a de baixo subiu',
+       _clicadas == [0, 0, 0, 0], str(_clicadas))
+
+_r, _clicadas, _sobrou = _mochila(["Elder's Bow", "Expert's Claymore"], falhar={'Bow'})
+
+checar('pilha que nao vira ordem fica, e o bot passa para a linha de baixo',
+       _r['ordens'] == 1 and _r['puladas'] == 1 and _sobrou == ["Elder's Bow"]
+       and _clicadas == [0, 1, 1], f'{_r} {_clicadas}')
+
+_r, _clicadas, _sobrou = _mochila(["Elder's Bow", "Expert's Claymore"], de_verdade=False)
+
+checar('simulando, nada sai da lista - uma linha depois da outra',
+       _r['ordens'] == 2 and _clicadas == [0, 1, 2] and len(_sobrou) == 2,
+       f'{_r} {_clicadas}')
+
+_r, _clicadas, _ = _mochila(['Item'] * 8, de_verdade=False)
+
+checar('so as linhas que cabem na tela', _r['ordens'] == republicar.LINHAS_VISIVEIS
+       and _clicadas == list(range(republicar.LINHAS_VISIVEIS)), str(_clicadas))
+
+_r, _clicadas, _ = _mochila([])
+
+checar('lista vazia: nenhuma ordem', _r['ordens'] == 0 and _clicadas == [0], str(_r))
 
 
 # ============================================================

@@ -416,9 +416,18 @@ def itens_mapeados():
 # passadas de mouse pelo menu em cascata.
 _AMBIGUOS = None
 
+# ITENS QUE A BUSCA NAO ACHA DIREITO SEM ESTAR DENTRO DE OUTRO NOME. A regra
+# automatica so ve nome contido em nome; estes se confundem na busca do jogo por
+# outro motivo, e vao sempre pelo menu.
+#
+#   Halberd   nos graus sem encantamento (T6.0, T7.0, T8.0) a busca traz outro
+#             item de nome parecido na frente, e a varredura voltava vazia nos
+#             tres; os encantados saiam certos
+SEMPRE_PELO_MENU = {'Halberd'}
+
 
 def ambiguo(item):
-    """True se o nome deste item aparece dentro do nome de outro."""
+    """True se o item precisa do menu: nome dentro de outro, ou da lista acima."""
 
     global _AMBIGUOS
 
@@ -426,6 +435,7 @@ def ambiguo(item):
         todos = itens_mapeados()
         _AMBIGUOS = {a for a in todos
                      if any(a != b and a.lower() in b.lower() for b in todos)}
+        _AMBIGUOS |= {a for a in SEMPRE_PELO_MENU if a in todos}
 
     return no_menu(item) in _AMBIGUOS
 

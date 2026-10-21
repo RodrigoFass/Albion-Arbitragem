@@ -499,7 +499,20 @@
     const deVerdade = h('button', { class: 'botao perigo-acao', onclick: () => executar(true) }, 'Vender de verdade');
     const porque = h('span', { class: 'nota' });
 
+    // VENDER PELO MERCADO: sem depender da compra - cada linha da lista "Sell
+    // from Inventory", uma prata abaixo do menor preco da qualidade Normal
+    const simularMercado = h('button', { class: 'botao', onclick: () => executarMercado(false) }, 'Simular');
+    const venderMercado = h('button', { class: 'botao perigo-acao', onclick: () => executarMercado(true) }, 'Vender a mochila');
+
     el.append(
+      cartao('Vender a mochila pelo mercado',
+        h('div', { class: 'linha' },
+          h('p', { class: 'nota', style: { margin: 0, flex: 1 } },
+            'Não precisa ter comprado pelo bot. Com o Mercado Negro aberto em "Sell from Inventory", o bot clica no Sell '
+            + 'de cada linha, de cima para baixo, e cria a ordem 1 prata abaixo do menor preço da qualidade Normal — na '
+            + 'frente da fila, com a pilha inteira. O que a lista mostrar é o que será vendido. Serve também para recolocar '
+            + 'uma ordem que você cancelou, com o preço de agora.'),
+          simularMercado, venderMercado)),
       cartao(null, h('div', { class: 'linha' },
         campo('Margem mínima', comUnidade(margem, '%')),
         campo('Vender na hora a partir de', comUnidade(perto, '% do alvo'))),
@@ -529,8 +542,9 @@
         nota.textContent = 'Os preços aqui são a última leitura do Mercado Negro; no jogo a decisão é refeita com o livro do momento.';
       } else {
         for (const c of [pago, receber, parada]) c.mostrar(null);
-        trocar(lista, h('div', { class: 'cartao' }, vazio('caixa', 'Nada para vender',
-          `A carga aparece aqui depois que o bot compra alguma coisa — ela vem do histórico das últimas ${r.horas} horas, com o preço pago por cada unidade.`,
+        trocar(lista, h('div', { class: 'cartao' }, vazio('caixa', 'Nenhuma compra do bot para vender',
+          `Esta carga vem das compras do bot nas últimas ${r.horas} horas, com o preço pago por cada unidade. `
+          + 'Para vender o que já está na mochila, use "Vender a mochila pelo mercado", acima.',
           { rotulo: 'Ir para Comprar', fazer: () => irPasso('comprar') })));
         nota.textContent = '';
       }
@@ -542,7 +556,23 @@
     function habilitar() {
       const tem = ultimo && ultimo.linhas && ultimo.linhas.length;
       simular.disabled = deVerdade.disabled = !tem || !!app.rodando;
+      simularMercado.disabled = venderMercado.disabled = !!app.rodando;
       porque.textContent = app.rodando ? 'Há uma operação em andamento.' : (tem ? '' : 'Sem carga para vender.');
+    }
+
+    async function executarMercado(real) {
+      if (real) {
+        const sim = await dialogo({
+          titulo: 'Vender a mochila pelo mercado?',
+          texto: 'Para cada linha da lista "Sell from Inventory", o bot cria a ordem de venda com a pilha inteira, '
+            + '1 prata abaixo do menor preço da qualidade Normal. Não há piso de custo: o preço é o do mercado agora, '
+            + 'e tudo o que a lista mostrar será posto à venda. F11 pausa, F12 para.',
+          sim: 'Vender',
+          tom: 'perigo',
+        });
+        if (!sim) return;
+      }
+      await app.rodar('vender_pelo_mercado', real);
     }
 
     async function executar(real) {
@@ -566,6 +596,7 @@
         lidosDosAjustes = chave;
         margem.value = (a.valores.margem * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 });
       }
+
       calcular();
     }
 

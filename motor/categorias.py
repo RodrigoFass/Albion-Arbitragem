@@ -423,7 +423,29 @@ _AMBIGUOS = None
 #   Halberd   nos graus sem encantamento (T6.0, T7.0, T8.0) a busca traz outro
 #             item de nome parecido na frente, e a varredura voltava vazia nos
 #             tres; os encantados saiam certos
-SEMPRE_PELO_MENU = {'Halberd'}
+#
+#   Greataxe, Great Fire Staff, Tome of Spells
+#             o T8 tem nome proprio (nomes.NOME_PROPRIO) - "Vendetta's Wrath"
+#             nao contem "Great Fire Staff", e a busca nunca o trazia. O menu
+#             seleciona o tipo do item, com todos os graus
+#
+# E OS QUE A BUSCA DO JOGO TRAZ JUNTO COM OUTROS ITENS QUE O BOT NAO CONHECE.
+# A regra automatica so compara nomes do proprio bot; estes saem de cruzar a
+# lista oficial de itens do jogo (ao-bin-dumps, formatted/items.txt):
+#
+#   as capas  no menu elas sao "Cape", "Bridgewatch", "Morgana"... e a busca por
+#             "Cape" traz TODAS as capas - a Demon Cape era lida como Cape. A de
+#             cidade traz o Crest junto; Morgana e Undead, as decorativas
+#   Knight Armor, Knight Boots, Knight Helmet
+#             a busca traz a Dragonknight, que vem antes na ordem alfabetica
+#   Claws     a busca traz as Shadow Claws
+_CAPAS_PELO_MENU = {'Cape', 'Avalonian', 'Brecilien', 'Bridgewatch', 'Caerleon',
+                    'Fort Sterling', 'Heretic', 'Lymhurst', 'Martlock', 'Morgana',
+                    'Smuggler', 'Thetford', 'Undead'}
+
+SEMPRE_PELO_MENU = ({'Halberd', 'Greataxe', 'Great Fire Staff', 'Tome of Spells',
+                     'Knight Armor', 'Knight Boots', 'Knight Helmet', 'Claws'}
+                    | _CAPAS_PELO_MENU)
 
 
 def ambiguo(item):

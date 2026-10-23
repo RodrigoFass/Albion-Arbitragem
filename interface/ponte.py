@@ -118,12 +118,13 @@ class Api:
 
         self._compra = None              # (origem, linhas) do ultimo calculo
         self._venda = None               # (carga, margem, perto)
+        self._venda_mochila = None       # o resumo da ultima venda pela mochila
         self._rede_msg = ''              # por que a leitura pela rede nao ligou
 
         self._erro_ao_abrir = None
 
-        for carregar, nome in ((catalogo.carregar, 'catálogo'),
-                               (ajustes.carregar, 'ajustes'),
+        for carregar, nome in ((ajustes.carregar, 'ajustes'),
+                               (self._carregar_catalogo, 'catálogo'),
                                (mercado.carregar, 'preços')):
             ok, erro = carregar()
             if not ok:
@@ -394,8 +395,9 @@ class Api:
         itens = self._itens_para_varrer(local, grupo, so_faltando)
         conf = ajustes.atuais()
 
+        # o que "apagar antes" tira: so os precos destes itens, e nao o mercado
         saida = {'local': local, 'itens': len(itens),
-                 'tinha': mercado.quantidade(local)}
+                 'tinha': mercado.quantidade(local, set(itens))}
 
         if not itens:
             aviso = ('Nenhuma combinação marcada para ler — marque alguma em '
@@ -504,7 +506,7 @@ class Api:
                  'resumo': None, 'aviso': None,
                  'qualidade': self._situacao_da_qualidade(conf)}
 
-        do_catalogo = catalogo.para_calcular()
+        do_catalogo = catalogo.para_calcular(so=conf.get('combinacoes_lidas'))
 
         if not do_catalogo:
             self._compra = None
@@ -536,7 +538,13 @@ class Api:
 
         saida.update(origem=origem, linhas=linhas, resumo=resumo)
 
-        if not linhas:
+        if not linhas and not mercado.itens(origem):
+            # cidade que nunca foi lida: a conta pula o que nao foi pesquisado,
+            # e "nada paga a margem" seria uma conclusao sem dado nenhum
+            saida['aviso'] = {'texto': f'Nenhum preço lido em {origem} ainda.',
+                              'acao': 'precos', 'rotulo': 'Ler preços'}
+
+        elif not linhas:
             saida['aviso'] = {'texto': f'Nada em {origem} paga a margem de '
                                        f'{margem * 100:.0f}%.'}
 
@@ -653,11 +661,21 @@ class Api:
         SEM DEPENDER DA COMPRA: o preco e o menor da qualidade Normal no Mercado
         Negro, menos uma prata - ver republicar.py."""
 
+        def vender():
+            r = republicar.vender(de_verdade=de_verdade)
+            if 'ordens' in r:
+                self._venda_mochila = dict(r, quando=time.strftime('%d/%m %H:%M'))
+
         return self._rodar(
-            lambda: republicar.vender(de_verdade=de_verdade),
+            vender,
             ('Vendendo pelo mercado' if de_verdade
              else 'Simulando a venda pelo mercado'),
             forcar)
+
+    def ultima_venda_mochila(self):
+        """O resumo da ultima venda pela mochila - o total a venda -, ou None."""
+
+        return self._venda_mochila
 
     def vender(self, de_verdade=False, forcar=False):
         """Vende a carga do ultimo calculo no Mercado Negro."""
@@ -876,10 +894,30 @@ class Api:
             return dict(self._mudou(), feito=f'{", ".join(rotulos)} = {quanto} em '
                         + (f'{len(itens)} itens' if itens else 'todos os itens'))
 
+    @staticmethod
+    def _carregar_catalogo():
+        """O catalogo da ultima vez. Se ele sumiu do disco, o padrao."""
+
+        nome = ajustes.atuais().get('catalogo') or 'padrao'
+
+        if nome != 'padrao' and nome not in catalogo.salvos():
+            nome = 'padrao'
+
+        return catalogo.carregar(nome)
+
+    @staticmethod
+    def _lembrar_catalogo():
+        """Guarda nos ajustes o catalogo em uso, para reabrir nele."""
+
+        ajustes.definir('catalogo', catalogo.nome_atual())
+        ajustes.salvar()
+
     def abrir_catalogo(self, nome):
 
         with self._trava:
             ok, erro = catalogo.carregar(nome)
+            if ok:
+                self._lembrar_catalogo()
             return self.catalogo_atual() if ok else {'erro': erro}
 
     def salvar_catalogo_como(self, nome):
@@ -889,6 +927,8 @@ class Api:
             if not nome:
                 return {'erro': 'Dê um nome ao catálogo.'}
             ok, erro = catalogo.salvar(nome)
+            if ok:
+                self._lembrar_catalogo()
             return self.catalogo_atual() if ok else {'erro': erro}
 
     # ======================================================================
@@ -1247,8 +1287,14 @@ class Api:
             comum.zerar_contadores()
             comum.instalar_teclas()
 
-            comum.definir_destino(lambda t: self._emitir('linha', texto=t,
-                                                         etiqueta=etiqueta(t)))
+            registro = _abrir_registro_da_operacao(rotulo)
+
+            def destino(t):
+                self._emitir('linha', texto=t, etiqueta=etiqueta(t))
+                _anotar(registro, t)
+
+            self._registro = registro
+            comum.definir_destino(destino)
             comum.definir_progresso(lambda f, t, r: self._emitir(
                 'progresso', feito=f, total=t, rotulo=r))
             comum.definir_aviso(lambda t, v, tom: self._emitir(
@@ -1297,6 +1343,14 @@ class Api:
     def _limpar(self):
 
         comum.definir_destino(None)
+
+        registro, self._registro = getattr(self, '_registro', None), None
+
+        if registro is not None:
+            try:
+                registro.close()
+            except Exception:
+                pass
         comum.definir_progresso(None)
         comum.definir_aviso(None)
         comum.definir_placar(None)
@@ -1324,6 +1378,36 @@ class Api:
             _avisar_que_terminou()
 
         self._emitir('fim', rotulo=rotulo)
+
+
+def _abrir_registro_da_operacao(rotulo):
+    """O andamento de toda operacao, em registros/operacoes, um arquivo por dia.
+
+    A varredura ja guardava o dela; compra, venda e soma das ordens so existiam
+    na tela - e uma compra que "so abre o painel e fecha" nao deixava rastro de
+    por que. Devolve o arquivo aberto, ou None: o registro nunca derruba nada."""
+
+    try:
+        destino = comum.pasta_registro('operacoes')
+        caminho = os.path.join(destino, f'{time.strftime("%Y-%m-%d")}.txt')
+        arquivo = open(caminho, 'a', encoding='utf-8', buffering=1)
+        arquivo.write(f'\n===== {time.strftime("%H:%M:%S")} - {rotulo} - '
+                      f'{comum.VERSAO} =====\n')
+        return arquivo
+
+    except Exception:
+        return None
+
+
+def _anotar(arquivo, texto):
+
+    if arquivo is None:
+        return
+
+    try:
+        arquivo.write(f'{texto}'.rstrip() + '\n')
+    except Exception:
+        pass
 
 
 def _maior(valores):

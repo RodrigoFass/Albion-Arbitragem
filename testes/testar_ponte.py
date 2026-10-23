@@ -182,7 +182,24 @@ checar('em lote nos itens marcados',
 r = api.salvar_catalogo_como('Teste')
 checar('salvar como troca o nome atual', r['nome'] == 'Teste' and 'Teste' in r['salvos'])
 
+# O CATALOGO EM USO VOLTA NA PROXIMA ABERTURA. Reabrir sempre no "padrao"
+# fazia a lista de compra cair de 77 linhas para 38 depois de uma atualizacao -
+# os mesmos precos, contados com outro catalogo
+checar('o catalogo salvo fica lembrado nos ajustes',
+       ajustes.atuais()['catalogo'] == 'Teste', str(ajustes.atuais()['catalogo']))
+
+checar('e uma abertura nova do programa volta nele',
+       ponte.Api() and catalogo.nome_atual() == 'Teste', catalogo.nome_atual())
+
+ajustes.definir('catalogo', 'Sumiu Do Disco')
+ponte.Api()
+checar('catalogo lembrado que sumiu do disco: abre o padrao',
+       catalogo.nome_atual() == 'padrao', catalogo.nome_atual())
+
 r = api.abrir_catalogo('padrao')
+
+checar('e abrir outro troca o lembrado',
+       ajustes.atuais()['catalogo'] == 'padrao', str(ajustes.atuais()['catalogo']))
 checar('e da para voltar ao outro', r['nome'] == 'padrao')
 
 arvore = api.itens_do_jogo()
@@ -208,8 +225,12 @@ r = api.calcular_compra('a melhor', '23,0', '', '')
 checar('a melhor cidade e a que tem preco', r['origem'] == 'Thetford', str(r['origem']))
 
 r = api.calcular_compra('Martlock', '23', '', '')
+# CIDADE NUNCA LIDA: a conta so olha o que foi pesquisado, entao nao ha "sem
+# preco" para contar - o aviso diz que falta ler, e leva para Ler precos
 checar('cidade sem preco diz por que a lista esta vazia',
-       not r['linhas'] and r['aviso'] and r['resumo']['sem_preco_de_compra'] > 0, str(r['aviso']))
+       not r['linhas'] and r['aviso'] and 'Nenhum preço lido' in r['aviso']['texto']
+       and r['aviso'].get('acao') == 'precos' and r['resumo']['sem_preco_de_compra'] == 0,
+       str(r['aviso']))
 
 r = api.calcular_compra('Thetford', '23', '', '15')
 checar('os espacos do inventario limitam as unidades', r['resumo']['unidades'] == 15,
@@ -263,6 +284,9 @@ finally:
 
 checar('e passa pelo portao do jogo pronto, como as outras operacoes',
        r.get('problemas') == ['jogo fechado (teste)'] and api._rodando is None, str(r))
+
+# O TOTAL A VENDA vem da ultima venda pela mochila; sem venda, nao ha
+checar('sem venda pela mochila, nao ha total para mostrar', api.ultima_venda_mochila() is None)
 
 
 # ============================================================

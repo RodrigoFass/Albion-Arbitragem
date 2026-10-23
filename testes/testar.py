@@ -252,18 +252,37 @@ checar('pedido de qualidade acima da do item nao conta',
 mercado.usar_banco(_banco_q)
 
 # faltar preco e diferente de negocio ruim: um pede coleta, o outro pede item
+mercado.gravar('Thetford', 'Lido Pela Metade', 'T6.0', 1000, _agora)
+mercado.gravar(mercado.MERCADO_NEGRO, 'Lido Pela Metade', 'T6.0', 5000, _agora)
 _, resumo_falta = lucro.montar(
-    [('Item Que Nao Existe', 'T5.0', 10)], 'Thetford', margem_minima=0.0)
+    [('Lido Pela Metade', 'T5.0', 10)], 'Thetford', margem_minima=0.0)
 
 checar('sem preco na cidade, conta como falta de coleta',
        resumo_falta['sem_preco_de_compra'] == 1)
 
+# SO O QUE FOI PESQUISADO: item que nunca foi lido na cidade nao e falha, e e
+# so o que ainda nao se varreu - contado, ele enchia o aviso de "sem preco"
+_, resumo_nunca = lucro.montar(
+    [('Item Que Nao Existe', 'T5.0', 10)], 'Thetford', margem_minima=0.0)
+
+checar('item nunca lido na cidade nao conta como sem preco',
+       resumo_nunca['sem_preco_de_compra'] == 0 and resumo_nunca['linhas'] == 0,
+       str(resumo_nunca))
+
 mercado.gravar('Thetford', 'So Na Cidade', 'T5.0', 1000, _agora)
+mercado.gravar(mercado.MERCADO_NEGRO, 'So Na Cidade', 'T6.0', 5000, _agora)
 _, resumo_meio = lucro.montar([('So Na Cidade', 'T5.0', 10)], 'Thetford',
                                    margem_minima=0.0)
 
 checar('sem preco no Mercado Negro, idem',
        resumo_meio['sem_preco_de_venda'] == 1)
+
+mercado.gravar('Thetford', 'Nunca No Negro', 'T5.0', 1000, _agora)
+_, resumo_negro = lucro.montar([('Nunca No Negro', 'T5.0', 10)], 'Thetford',
+                               margem_minima=0.0)
+
+checar('e item nunca lido no Mercado Negro tambem fica de fora calado',
+       resumo_negro['sem_preco_de_venda'] == 0, str(resumo_negro))
 
 # preco velho nao decide compra
 mercado.gravar('Thetford', 'Velho', 'T5.0', 1000, _agora - 48 * 3600)
@@ -1232,6 +1251,34 @@ try:
            mercado.ler('Thetford', 'Broadsword', 'T6.0')[0] == 6000
            and mercado.ler('Thetford', 'Broadsword', 'T6.1')[0] == 6100)
 
+    # O CASO DO JOGO: Mage Cape-Bag lido no Mercado Negro, depois o grupo
+    # Armors. Apagar o mercado inteiro levava o Mage Cape-Bag junto, e ele
+    # sumia da compra
+    mercado.usar_banco({})
+    mercado.gravar(mercado.MERCADO_NEGRO, 'Bag', 'T6.0', 30000)
+    mercado.gravar(mercado.MERCADO_NEGRO, 'Cleric Robe', 'T6.0', 90000)
+
+    _saiu = mercado.apagar_mercado(mercado.MERCADO_NEGRO, ['Cleric Robe', 'Nao Lido'])
+
+    checar('apagar antes de ler um grupo tira so os itens dele',
+           _saiu == 1 and mercado.ler(mercado.MERCADO_NEGRO, 'Bag', 'T6.0')[0] == 30000
+           and mercado.ler(mercado.MERCADO_NEGRO, 'Cleric Robe', 'T6.0')[0] is None,
+           str(_saiu))
+
+    checar('e o plano conta so os precos desses itens',
+           mercado.quantidade(mercado.MERCADO_NEGRO, {'Bag'}) == 1
+           and mercado.quantidade(mercado.MERCADO_NEGRO) == 1)
+
+    mercado.gravar(mercado.MERCADO_NEGRO, 'Cleric Robe', 'T7.0', 150000)
+    _voltaram = mercado.restaurar_copia(mercado.MERCADO_NEGRO)
+
+    checar('trazer de volta junta a copia, sem apagar o que foi lido depois',
+           _voltaram == 1
+           and mercado.ler(mercado.MERCADO_NEGRO, 'Cleric Robe', 'T6.0')[0] == 90000
+           and mercado.ler(mercado.MERCADO_NEGRO, 'Cleric Robe', 'T7.0')[0] == 150000
+           and mercado.ler(mercado.MERCADO_NEGRO, 'Bag', 'T6.0')[0] == 30000,
+           str(_voltaram))
+
     # A COPIA NAO PODE DERRUBAR A VARREDURA. Se o disco recusar, o que se perde e
     # a rede - nao a coleta que estava para comecar.
     mercado.ARQUIVO_ANTERIOR = _os2.path.join('Z:', 'nao', 'existe', 'x.json')
@@ -1776,6 +1823,25 @@ _ok = _com_faixa(_faixa, lambda: filtros.escolher(cd.CMP_BARRA_ENCH, cd.ench_com
 checar('so devolve depois de a animacao de fechar terminar',
        _ok is True and _faixa.estado == 'fechada', f'{_ok} {_faixa.estado}')
 
+# A LISTA ABERTA E ESPERADA PARADA ATE A OPCAO, NO RITMO LENTO. No ritmo rapido
+# tres quadros iguais sao ~50 ms, menos que a lista levando para abrir, e o
+# clique no T5 caia no T4
+_esperas = []
+_real_estavel = comum.esperar_estavel
+comum.esperar_estavel = lambda regiao, limite, exigidas=None, intervalo=None: (
+    _esperas.append((tuple(regiao), intervalo)), True)[1]
+
+try:
+    _opcao = cd.tier_compra(5)
+    _com_faixa(FaixaDoDropdown(), lambda: filtros.escolher(cd.CMP_BARRA_ENCH, _opcao))
+finally:
+    comum.esperar_estavel = _real_estavel
+    comum.zerar_contadores()
+
+checar('a lista aberta e esperada parada ate a opcao, no ritmo lento',
+       _esperas and _esperas[0][1] == comum.SONDAGEM_LENTA
+       and _esperas[0][0][3] >= _opcao['y'], str(_esperas[:1]))
+
 _faixa = FaixaDoDropdown(clique_pega=False)
 _opcao = cd.ench_compra(2)
 _ok = _com_faixa(_faixa, lambda: filtros.escolher(cd.CMP_BARRA_ENCH, _opcao))
@@ -1989,8 +2055,8 @@ checar('e o de nome ambiguo vai SO pelo menu',
 checar('um caminho por item, nunca os dois',
        not (_jogo.pelo_menu and _jogo.buscados))
 
-checar('sao 19 assim entre os 252 (18 de nome contido e o Halberd), o resto pela busca',
-       len(categorias.ambiguos()) == 19, str(len(categorias.ambiguos())))
+checar('sao 39 assim entre os 252 (18 de nome contido e 21 que a busca do jogo confunde), o resto pela busca',
+       len(categorias.ambiguos()) == 39, str(len(categorias.ambiguos())))
 
 # --- o "Travertine": a base tirada no meio do redesenho ---------------------
 # Zerar a busca faz a lista voltar ao mercado inteiro, e o primeiro item dele em
@@ -2331,6 +2397,17 @@ checar('a lista de compras sai do catalogo mais o banco de precos',
 checar('e a quantidade e a que voce escolheu',
        _linhas[0]['quantidade'] == 80, str(_linhas[0]['quantidade']))
 
+# A COMPRA SO CONTA O QUE A LEITURA LE. Com o T5.2 desmarcado na leitura, ele
+# entrava na conta sem nunca ter preco: "46 sem preco na cidade", 43 deles T5.2
+_todas = catalogo.para_calcular()
+_marcadas = catalogo.para_calcular(so=['T6.0', 'T7.0'])
+
+checar('a conta da compra fica so com as combinacoes marcadas para ler',
+       {r for _, r, _ in _marcadas} <= {'T6.0', 'T7.0'} and ('Assassin Jacket', 'T6.0', 80) in _marcadas
+       and len(_marcadas) < len(_todas), f'{len(_marcadas)} de {len(_todas)}')
+
+checar('e sem filtro marcado, todas', catalogo.para_calcular(so=None) == _todas)
+
 checar('com o preco de compra e de venda de cada mercado',
        _linhas[0]['compra'] == 49871 and _linhas[0]['venda'] == 61662)
 
@@ -2570,27 +2647,43 @@ checar('e o motivo e o preco', 'caro' in _motivo, _motivo)
 
 
 class Livro:
-    """As seis linhas do painel, do ponto de vista de quem le."""
+    """As seis linhas do painel, do ponto de vista de quem le.
+
+    Preco None e linha com numero que nao deu para ler; depois da ultima linha,
+    o livro esta vazio."""
 
     def __init__(self, linhas):
         self.linhas = linhas
 
-    def numero(self, regiao):
+    def _linha(self, regiao):
         for n in range(cd.LIVRO_LINHAS):
-            if tuple(regiao) == cd.venda_preco(n):
-                return self.linhas[n][0] if n < len(self.linhas) else None
-            if tuple(regiao) == cd.venda_quantidade(n):
-                return self.linhas[n][1] if n < len(self.linhas) else None
+            if regiao in (cd.venda_preco_numero(n), cd.venda_quantidade(n)):
+                return n
         return None
+
+    def inteiro(self, regiao, minimo, maximo):
+        n = self._linha(regiao)
+        if n is None or n >= len(self.linhas):
+            return None
+        return self.linhas[n][0 if regiao == cd.venda_preco_numero(n) else 1]
+
+    def vazia(self, regiao):
+        return self._linha(regiao) >= len(self.linhas)
 
 
 def _com_livro(livro, acao):
-    real = comum.ler_numero
-    comum.ler_numero = livro.numero
+    reais = (comum.capturar, compra._recorte_do_livro, compra.ler_inteiro,
+             compra._linha_vazia, compra._esperar_livro)
+    compra._esperar_livro = lambda: True
+    comum.capturar = lambda regiao: None
+    compra._recorte_do_livro = lambda tela, regiao: tuple(regiao)
+    compra.ler_inteiro = livro.inteiro
+    compra._linha_vazia = livro.vazia
     try:
         return acao()
     finally:
-        comum.ler_numero = real
+        (comum.capturar, compra._recorte_do_livro, compra.ler_inteiro,
+         compra._linha_vazia, compra._esperar_livro) = reais
         comum.zerar_contadores()
 
 
@@ -2614,6 +2707,247 @@ _lido = _com_livro(Livro([(898, None), (899, 5)]), compra.ler_livro)
 checar('quantidade ilegivel conta como uma, e nao como nenhuma',
        _lido == [(898, 1), (899, 5)], str(_lido))
 
+# A LINHA COM O MOUSE EM CIMA FICA MAIS ESCURA, e o OCR pode nao le-la. Ela nao
+# e o fim do livro: parar ali fazia a compra levar uma unidade so
+_lido = _com_livro(Livro([(898, 1), (None, 2), (899, 5)]), compra.ler_livro)
+
+checar('linha ilegivel no meio e pulada, e o livro segue ate a linha vazia',
+       _lido == [(898, 1), (899, 5)], str(_lido))
+
+# O PRINT DO JOGO, com o tesseract de verdade: o painel do Grandmaster's
+# Hoarfrost Staff, com a segunda linha escurecida pelo mouse. A leitura antiga
+# devolvia [(229798, 1)] - uma oferta de seis, e todas as quantidades em 1
+_tela_livro = _Img2.open(_os.path.join(_PASTA_AMOSTRAS, 'livro_hoarfrost.png')).convert('RGB')
+_real_capturar, _real_esperar_livro = comum.capturar, compra._esperar_livro
+comum.capturar = lambda regiao: _tela_livro
+compra._esperar_livro = lambda: True
+
+try:
+    _lido = compra.ler_livro()
+finally:
+    comum.capturar, compra._esperar_livro = _real_capturar, _real_esperar_livro
+    comum.zerar_contadores()
+
+# O PAINEL ABRE ANTES DO LIVRO: as ofertas chegam do servidor um instante
+# depois. Lendo o livro em branco, a compra dizia "nao deu para ler o livro" em
+# todo item - abria o painel e fechava
+_quadros = [_Img2.new('RGB', _tela_livro.size, (236, 200, 160))] * 3 + [_tela_livro]
+_vistos = []
+_reais_espera = (comum.capturar, comum.esperar_estavel, compra.time.sleep)
+
+
+def _quadro(regiao):
+    _vistos.append(1)
+    return _quadros[min(len(_vistos), len(_quadros)) - 1]
+
+
+comum.capturar = _quadro
+comum.esperar_estavel = lambda *a, **k: True
+compra.time.sleep = lambda s: None
+
+try:
+    _chegou = compra._esperar_livro()
+    _quadros_ate_chegar = len(_vistos)
+    _quadros = [_quadros[0]]
+    _vistos.clear()
+    _real_espera, compra.ESPERA_LIVRO = compra.ESPERA_LIVRO, 0.05
+    _vazio = compra._esperar_livro()
+    compra.ESPERA_LIVRO = _real_espera
+finally:
+    comum.capturar, comum.esperar_estavel, compra.time.sleep = _reais_espera
+    comum.zerar_contadores()
+
+checar('o livro em branco e esperado ate a primeira oferta aparecer',
+       _chegou is True and _quadros_ate_chegar == 4, f'{_chegou} em {_quadros_ate_chegar} quadros')
+
+checar('e livro que nunca chega volta como vazio, sem travar',
+       _vazio is False, str(_vazio))
+
+checar('o livro do print do jogo: as seis ofertas, com as quantidades',
+       _lido == [(229_798, 1), (229_800, 2), (229_800, 1), (229_835, 5),
+                 (229_838, 1), (229_838, 1)], str(_lido))
+
+# A LINHA DESTACADA: abrindo o painel pelo Buy, o jogo pinta a oferta mais
+# barata de verde, com o numero amarelo. Ela passava por linha vazia, e a
+# compra fechava o painel sem comprar ("nao deu para ler o livro" em todo item).
+# O print e do painel do Master's Enigmatic Staff, com o texto mais claro
+_tela_destacada = _Img2.open(_os.path.join(_PASTA_AMOSTRAS, 'livro_enigmatic_destacado.png')).convert('RGB')
+_reais_livro = (comum.capturar, compra._esperar_livro)
+comum.capturar = lambda regiao: _tela_destacada
+compra._esperar_livro = lambda: True
+
+try:
+    _lido = compra.ler_livro()
+    _vazia = compra._linha_vazia(compra._recorte_do_livro(_tela_destacada, cd.venda_preco_numero(0)))
+finally:
+    comum.capturar, compra._esperar_livro = _reais_livro
+    comum.zerar_contadores()
+
+checar('a linha destacada pelo Buy nao e linha vazia', not _vazia)
+
+checar('e o livro com ela sai inteiro, a destacada lida invertida',
+       _lido == [(118_498, 1), (118_499, 1), (118_499, 1), (118_500, 1),
+                 (118_998, 1), (118_999, 1)], str(_lido))
+
+# --- rolar o livro -----------------------------------------------------------
+# SO CABEM SEIS OFERTAS NA TELA: vinte unidades do Enigmatic Staff iam ate
+# 139.986. Cada tela nova e encaixada na anterior pelas ofertas lidas - o livro
+# e ordenado pelo preco.
+
+checar('a tela nova encaixa no fim da anterior',
+       compra.sobreposicao([(100, 1), (101, 2), (102, 1)], [(101, 2), (102, 1), (103, 1)]) == 2)
+
+checar('ofertas iguais em sequencia: vale o maior encaixe, que conta menos',
+       compra.sobreposicao([(100, 1), (101, 1), (101, 1)], [(101, 1), (101, 1), (102, 1)]) == 2)
+
+checar('sem encaixe nenhum, zero', compra.sobreposicao([(100, 1)], [(105, 1)]) == 0)
+
+
+class LivroLongo:
+    """Um livro de <total> ofertas de uma unidade, a 100, 101, 102...
+
+    O cabo da barra anda <pixels_por_linha> pixels por linha do livro."""
+
+    def __init__(self, total, pixels_por_linha=4):
+        self.total, self.topo, self.ppl = total, 0, pixels_por_linha
+        self.puxoes = []
+
+    def capturar(self, regiao):
+        return self.topo
+
+    def puxar(self, pixels):
+        if self.total <= cd.LIVRO_LINHAS:
+            return False
+        self.puxoes.append(pixels)
+        linhas = int(pixels / self.ppl)
+        self.topo = min(max(0, self.total - cd.LIVRO_LINHAS), max(0, self.topo + linhas))
+        return True
+
+    def ler_tela(self, topo):
+        ofertas = [(100 + n, 1) for n in range(topo, min(topo + cd.LIVRO_LINHAS, self.total))]
+        return ofertas, topo + cd.LIVRO_LINHAS > self.total
+
+
+def _ler_longo(livro, **limites):
+    reais = (comum.capturar, compra._esperar_livro, compra._ler_tela, compra._puxar_cabo)
+    comum.capturar = livro.capturar
+    compra._esperar_livro = lambda: True
+    compra._ler_tela = livro.ler_tela
+    compra._puxar_cabo = livro.puxar
+    try:
+        return compra.ler_livro(**limites)
+    finally:
+        (comum.capturar, compra._esperar_livro, compra._ler_tela, compra._puxar_cabo) = reais
+        comum.zerar_contadores()
+
+
+_longo = LivroLongo(30)
+_lido = _ler_longo(_longo, ate_unidades=20, ate_preco=10_000)
+
+checar('desce o livro ate juntar a quantidade da linha',
+       sum(q for _, q in _lido) >= 20 and _lido[:20] == [(100 + n, 1) for n in range(20)],
+       str(_lido))
+
+checar('e cada oferta e lida uma vez so', len(_lido) == len(set(_lido)), str(_lido))
+
+checar('descendo pelo cabo da barra, arrastado', _longo.puxoes and all(p > 0 for p in _longo.puxoes),
+       str(_longo.puxoes))
+
+_longo = LivroLongo(30, pixels_por_linha=1)
+_lido = _ler_longo(_longo, ate_unidades=20, ate_preco=10_000)
+
+checar('puxao que pula mais que uma tela: volta, puxa menos, e nao perde oferta',
+       _lido[:20] == [(100 + n, 1) for n in range(20)] and any(p < 0 for p in _longo.puxoes),
+       f'{_lido} {_longo.puxoes}')
+
+_longo = LivroLongo(30, pixels_por_linha=20)
+_lido = _ler_longo(_longo, ate_unidades=12, ate_preco=10_000)
+
+checar('puxao curto que nao mexe a lista: puxa mais forte',
+       _lido[:12] == [(100 + n, 1) for n in range(12)] and max(_longo.puxoes) > compra.PASSO_DO_CABO,
+       f'{_lido} {_longo.puxoes}')
+
+_lido = _ler_longo(LivroLongo(30), ate_unidades=20, ate_preco=107)
+
+checar('e para quando o preco passa do que ainda paga a margem',
+       max(p for p, _ in _lido) <= 109 and len(_lido) < 20, str(_lido))
+
+_lido = _ler_longo(LivroLongo(9), ate_unidades=20, ate_preco=10_000)
+
+checar('livro que acaba antes: le ate a ultima oferta',
+       _lido == [(100 + n, 1) for n in range(9)], str(_lido))
+
+_longo = LivroLongo(30)
+_lido = _ler_longo(_longo)
+
+checar('sem quantidade nem teto, so a primeira tela e nada de puxar',
+       len(_lido) == cd.LIVRO_LINHAS and not _longo.puxoes, f'{_lido} {_longo.puxoes}')
+
+# O CABO DA BARRA nos prints do jogo: no topo da lista e depois de descer
+for _nome, _y in (('livro_barra_topo.png', 389), ('livro_barra_descida.png', 422)):
+    _c = compra.cabo_da_barra(_Img2.open(_os.path.join(_PASTA_AMOSTRAS, _nome)).convert('RGB'))
+    checar(f'o cabo da barra achado no print ({_nome})',
+           _c is not None and abs(_c + cd.LIVRO_BARRA[1] - _y) <= 2, str(_c))
+
+# --- a confirmacao do pedido de compra ---------------------------------------
+# "Do you really want to place a buy order with 7 Master's Enigmatic Staff that
+# pays 118,998 each? You have to pay 853,811" - so Yes se bater com o plano
+
+_coluna = _Img2.open(_os.path.join(_PASTA_AMOSTRAS, 'dialogo_ordem_coluna.png')).convert('RGB')
+
+checar('os botoes do dialogo achados pela cor, na altura do print',
+       compra._botoes_do_dialogo(_coluna) is not None
+       and abs(compra._botoes_do_dialogo(_coluna) + cd.DIALOGO_ORDEM_COLUNA[1] - 571) <= 3,
+       str(compra._botoes_do_dialogo(_coluna)))
+
+_texto_dialogo = _Img2.open(_os.path.join(_PASTA_AMOSTRAS, 'dialogo_ordem_7x118998.png')).convert('RGB')
+_real_capturar = comum.capturar
+comum.capturar = lambda regiao: _texto_dialogo
+
+try:
+    _numeros = compra.numeros_do_dialogo(comum.ler_texto(cd.DIALOGO_ORDEM_TEXTO))
+finally:
+    comum.capturar = _real_capturar
+
+checar('o texto do dialogo do print: quantidade, preco e total',
+       {7, 118_998, 853_811} <= _numeros, str(_numeros))
+
+
+def _confirmar_com(texto, com_dialogo=True):
+    cliques = []
+    reais = (comum.capturar, comum.ler_texto, comum.clicar, comum.esperar_estavel,
+             comum.salvar_diagnostico, compra.ESPERA_DIALOGO)
+    comum.capturar = lambda regiao: _coluna if com_dialogo else _Img2.new('RGB', _coluna.size, (230, 195, 160))
+    comum.ler_texto = lambda regiao: texto
+    comum.clicar = lambda pos, espera=None: cliques.append((pos['x'], pos['y']))
+    comum.esperar_estavel = lambda *a, **k: True
+    comum.salvar_diagnostico = lambda *a, **k: cliques.append('diagnostico')
+    compra.ESPERA_DIALOGO = 0.3
+    try:
+        return compra.confirmar_ordem({'preco': 118_998, 'unidades': 7}), cliques
+    finally:
+        (comum.capturar, comum.ler_texto, comum.clicar, comum.esperar_estavel,
+         comum.salvar_diagnostico, compra.ESPERA_DIALOGO) = reais
+        comum.zerar_contadores()
+
+
+_texto_ok = "Do you really want to place a buy order with 7\nMaster's Enigmatic Staff that pays 118,998\neach? You have to pay 853,811."
+(_ok, _), _cliques = _confirmar_com(_texto_ok)
+
+checar('dialogo que bate com o plano: Yes',
+       _ok and len(_cliques) == 1 and _cliques[0][0] == cd.DIALOGO_ORDEM_SIM_X, str(_cliques))
+
+(_ok, _motivo), _cliques = _confirmar_com(_texto_ok.replace('118,998', '128,998').replace('853,811', '925,561'))
+
+checar('dialogo com outro preco: No, e fica o diagnostico',
+       not _ok and (cd.DIALOGO_ORDEM_NAO_X, _cliques[0][1]) in _cliques and 'diagnostico' in _cliques,
+       f'{_motivo} {_cliques}')
+
+(_ok, _), _cliques = _confirmar_com('', com_dialogo=False)
+
+checar('sem dialogo na tela: a ordem ja foi criada, e nada e clicado', _ok and not _cliques,
+       str(_cliques))
+
 
 # ============================================================
 grupo('criar a ordem na tela')
@@ -2633,7 +2967,7 @@ class Painel:
     def clicar(self, pos, espera=None):
         self.cliques.append((pos['x'], pos['y']))
 
-        for nome, campo in (('qtd', cd.PAINEL_QTD_BARRA),
+        for nome, campo in (('qtd', cd.PAINEL_QTD_NUMERO),
                             ('preco', cd.PAINEL_PRECO_CAMPO)):
             if (pos['x'], pos['y']) == (campo['x'], campo['y']):
                 # o clique que erra por dois pixels cai no campo de cima
@@ -2657,25 +2991,31 @@ class Painel:
         if alvo == cd.PAINEL_QTD_VALOR:
             return int(self.campos['qtd']) if self.campos.get('qtd') else None
 
-        if alvo == cd.PAINEL_PRECO_VALOR:
+        if alvo == cd.VND_PRECO_VALOR:
             return int(self.campos['preco']) if self.campos.get('preco') else None
 
-        if alvo == cd.PAINEL_TOTAL:
+        if alvo == cd.PAINEL_TOTAL_VALOR:
             if self.total_ilegivel:
                 return None
             if self.total_na_tela is not None:
                 return self.total_na_tela
             qtd = int(self.campos.get('qtd') or 0)
             preco = int(self.campos.get('preco') or 0)
-            return int(qtd * preco * (1 + lucro.TAXA_DE_ORDEM)) or None
+            return compra.total_da_ordem(preco, qtd) or None
 
         return None
 
 
 def _com_painel(painel, acao):
     reais = (comum.clicar, comum.digitar, comum.limpar_campo, comum.ler_numero,
-             comum.esperar_estavel, comum.assinatura, comum.esperar_mudanca)
+             comum.esperar_estavel, comum.assinatura, comum.esperar_mudanca,
+             compra.ler_campo, compra.ESPERA_ENTRE_LEITURAS, comum.salvar_diagnostico,
+             compra.confirmar_ordem)
 
+    compra.confirmar_ordem = lambda plano: (painel.cliques.append('confirmou'), (True, ''))[1]
+    compra.ler_campo = lambda regiao: [painel.numero(regiao)]
+    compra.ESPERA_ENTRE_LEITURAS = 0
+    comum.salvar_diagnostico = lambda *a, **k: painel.cliques.append('diagnostico')
     comum.clicar = painel.clicar
     comum.digitar = painel.digitar
     comum.limpar_campo = painel.limpar
@@ -2688,7 +3028,9 @@ def _com_painel(painel, acao):
         return acao()
     finally:
         (comum.clicar, comum.digitar, comum.limpar_campo, comum.ler_numero,
-         comum.esperar_estavel, comum.assinatura, comum.esperar_mudanca) = reais
+         comum.esperar_estavel, comum.assinatura, comum.esperar_mudanca,
+         compra.ler_campo, compra.ESPERA_ENTRE_LEITURAS,
+         comum.salvar_diagnostico, compra.confirmar_ordem) = reais
         comum.zerar_contadores()
 
 
@@ -2707,9 +3049,20 @@ checar('a quantidade e o preco vao para os campos certos',
        _p.campos['qtd'] == '53' and _p.campos['preco'] == '899',
        str(_p.campos))
 
-checar('e o clique em criar e o ultimo',
-       _p.cliques[-1] == (cd.PAINEL_CRIAR['x'], cd.PAINEL_CRIAR['y']),
-       str(_p.cliques[-1]))
+# A QUANTIDADE VAI NA BOLHA do "1", em cima da barra - como no print do jogo.
+# Clicar no meio da barra so arrastava a barra
+checar('a quantidade e digitada na bolha em cima da barra',
+       (cd.PAINEL_QTD_NUMERO['x'], cd.PAINEL_QTD_NUMERO['y']) in _p.cliques
+       and (cd.PAINEL_QTD_BARRA['x'], cd.PAINEL_QTD_BARRA['y']) not in _p.cliques,
+       str(_p.cliques))
+
+checar('o Total do painel e o reservado mais a taxa arredondada para cima',
+       compra.total_da_ordem(3, 1) == 4 and compra.total_da_ordem(899, 53) == 47_647 + 1_192,
+       str(compra.total_da_ordem(899, 53)))
+
+checar('e o clique em criar e o ultimo, com a pergunta do jogo respondida depois',
+       _p.cliques[-2:] == [(cd.PAINEL_CRIAR['x'], cd.PAINEL_CRIAR['y']), 'confirmou'],
+       str(_p.cliques[-2:]))
 
 # DIGITAR NUM CAMPO QUE JA TEM NUMERO CONCATENA. Pedir 899 num campo que mostrava
 # 54 daria 54899, e o jogo aceitaria - uma ordem setenta vezes maior.
@@ -2730,20 +3083,23 @@ _res, _motivo = _com_painel(_p, lambda: compra.criar_ordem(_PLANO))
 checar('Total divergente na tela impede a ordem', not _res)
 
 checar('e o motivo diz os dois numeros',
-       '999.999' in _motivo and comum.fmt(_PLANO['custo_maximo']) in _motivo,
+       '999.999' in _motivo
+       and comum.fmt(compra.total_da_ordem(_PLANO['preco'], _PLANO['unidades'])) in _motivo,
        _motivo)
 
 checar('e nao clica em criar',
        (cd.PAINEL_CRIAR['x'], cd.PAINEL_CRIAR['y']) not in _p.cliques,
        str(_p.cliques))
 
-# ausencia de evidencia nao e evidencia de erro: recorte fora do lugar nao pode
-# travar a compra inteira
+# O TOTAL E QUEM CONFERE A QUANTIDADE: a bolha anda com a barra, e depois de
+# digitar nao ha lugar fixo para le-la de volta. Sem Total, sem ordem
 _p = Painel()
 _p.total_ilegivel = True
-_res, _ = _com_painel(_p, lambda: compra.criar_ordem(_PLANO))
+_res, _motivo = _com_painel(_p, lambda: compra.criar_ordem(_PLANO))
 
-checar('Total ilegivel deixa criar, e fica registrado', _res)
+checar('Total ilegivel impede a ordem, e fica o diagnostico',
+       not _res and (cd.PAINEL_CRIAR['x'], cd.PAINEL_CRIAR['y']) not in _p.cliques
+       and 'diagnostico' in _p.cliques and 'ilegivel' in _motivo, _motivo)
 
 # --- o clique que erra o campo ---------------------------------------------
 # Dois pixels acima e a quantidade vai para o preco. Ler de volta e o que separa
@@ -2752,9 +3108,33 @@ _p = Painel()
 _p.erra_o_campo = True
 _res, _motivo = _com_painel(_p, lambda: compra.criar_ordem(_PLANO))
 
-checar('clique que erra o campo nao vira ordem', not _res)
+checar('clique que erra o campo nao vira ordem', not _res, _motivo)
 
 checar('e diz qual campo falhou', 'quantidade' in _motivo, _motivo)
+
+# O PAINEL ABRE PELO "BUY" DA LINHA, que so abre o painel - quem compra e o Buy
+# de dentro dele. O nome do item era uma posicao derivada, nunca medida
+_p = Painel()
+_com_painel(_p, compra.abrir_painel)
+
+checar('o painel do item abre pelo Buy da linha',
+       _p.cliques == [(cd.CMP_COMPRAR_1['x'], cd.CMP_COMPRAR_1['y'])], str(_p.cliques))
+
+# OS TOTAIS DOS PRINTS DO JOGO, com o tesseract de verdade: o "Total: 4" do
+# pedido de compra de Scraps of Hide e o 882.424 da venda no Mercado Negro
+import glob as _glob_t   # noqa: E402
+import os as _os_t       # noqa: E402
+from PIL import Image as _Img_t   # noqa: E402
+
+_totais = sorted(_glob_t.glob(_os_t.path.join(
+    _os_t.path.dirname(_os_t.path.abspath(__file__)), 'amostras', 'total_*.png')))
+
+checar('as duas amostras do Total estao no lugar', len(_totais) == 2, str(_totais))
+
+for _caminho in _totais:
+    _valor = int(_os_t.path.basename(_caminho)[6:-4])
+    _lidos = compra.ler_campo_da_imagem(_Img_t.open(_caminho).convert('RGB'))
+    checar(f'Total lido: {_valor}', _valor in _lidos, str(_lidos))
 
 
 # ============================================================
@@ -3187,8 +3567,32 @@ grupo('o Mercado Negro: busca ou menu')
 # A busca do jogo devolve tudo que contem o que voce digitou. "Cursed Staff"
 # traz o "Great Cursed Staff" junto; "Bow" traz Crossbow, Warbow e mais seis.
 
-checar('sao 19 itens ambiguos entre os 252 (18 de nome contido e o Halberd)',
-       len(categorias.ambiguos()) == 19, str(len(categorias.ambiguos())))
+checar('sao 39 itens ambiguos entre os 252 (18 de nome contido e 21 que a busca do jogo confunde)',
+       len(categorias.ambiguos()) == 39, str(len(categorias.ambiguos())))
+
+# O T8 COM NOME PROPRIO, da lista oficial do jogo: a busca por "Great Fire
+# Staff" nunca trazia o "Vendetta's Wrath", e o T8 ficava sem preco
+from motor import nomes as _nomes_t8   # noqa: E402
+
+checar('o T8 desses itens tem o nome do jogo, sem "Elder\'s"',
+       _nomes_t8.completo('Great Fire Staff', 8) == "Vendetta's Wrath"
+       and _nomes_t8.completo('Greataxe', 8) == 'The Hand of Khor'
+       and _nomes_t8.completo('Tome of Spells', 8) == "Rosalia's Diary",
+       _nomes_t8.completo('Great Fire Staff', 8))
+
+checar('e os outros graus continuam com o prefixo',
+       _nomes_t8.completo('Great Fire Staff', 7) == "Grandmaster's Great Fire Staff")
+
+checar('os tres vao sempre pelo menu, que traz todos os graus do tipo',
+       all(categorias.ambiguo(i) for i in ('Greataxe', 'Great Fire Staff', 'Tome of Spells')))
+
+# A BUSCA DO JOGO TRAZ OUTROS ITENS JUNTO: "Cape" traz todas as capas - a
+# Demon Cape era lida como Cape -, "Knight Armor" traz a Dragonknight Armor
+checar('as capas, os Knight e as Claws vao sempre pelo menu',
+       all(categorias.ambiguo(i) for i in ('Cape', 'Bridgewatch', 'Morgana Cape', 'Undead Cape',
+                                          'Knight Armor', 'Knight Boots', 'Knight Helmet', 'Claws')),
+       str([i for i in ('Cape', 'Bridgewatch', 'Morgana Cape', 'Knight Armor', 'Claws')
+            if not categorias.ambiguo(i)]))
 
 # NOS GRAUS SEM ENCANTAMENTO A BUSCA DO HALBERD TRAZ OUTRO ITEM NA FRENTE: a
 # varredura de Lymhurst voltava vazia no T6.0, T7.0 e T8.0 dele
@@ -3202,8 +3606,9 @@ checar('o simples e ambiguo, o composto nao',
 checar('e "Bow" tambem, por causa de Crossbow e Warbow',
        categorias.ambiguo('Bow') and not categorias.ambiguo('Warbow'))
 
+# 39 dos 252 pelo menu: os de nome contido e os que a busca do jogo confunde
 checar('a maioria vai pela busca, que e mais rapida',
-       len(categorias.ambiguos()) < len(categorias.itens_mapeados()) / 10)
+       len(categorias.ambiguos()) < len(categorias.itens_mapeados()) / 5)
 
 
 class Tela:
@@ -3452,8 +3857,14 @@ grupo('o laco que percorre a lista e compra')
 # o lucro.py sabia montar a lista. Entre os dois nao havia nada, e a tela dizia
 # isso em voz alta.
 
+from motor import ajustes
 from motor import comprador
 from motor import historico
+
+# Este grupo confere o Smart Buy - ordem com volume, na hora no item caro. O
+# padrao agora e "sempre ordem"; aqui o automatico e escolhido de proposito.
+_modo_antes_do_laco = ajustes.atuais()['modo_de_compra']
+ajustes.definir('modo_de_compra', 'smart')
 
 
 class Loja:
@@ -3495,7 +3906,7 @@ class Loja:
     def fechar_painel(self):
         pass
 
-    def ler_livro(self, linhas=None):
+    def ler_livro(self, ate_unidades=None, ate_preco=None):
         return list(self.livros.get(self.item, []))
 
     def livro_vazio(self):
@@ -3538,8 +3949,11 @@ def _com_loja(loja, acao):
              compra.ler_livro, compra.livro_vazio, compra.criar_ordem,
              compra.comprar_uma, comum.jogo_em_foco, comum.sem_foco,
              comum.relatar, comum.progresso, historico.registrar,
-             filtros.grau, filtros.encantamento, filtros.limpar)
+             filtros.grau, filtros.encantamento, filtros.limpar,
+             compra.guardar_tela_do_painel)
 
+    loja.prints = []
+    compra.guardar_tela_do_painel = lambda nome: (loja.prints.append(nome), None)[1]
     filtros.grau = loja.grau
     filtros.encantamento = loja.encantamento
     filtros.limpar = loja.limpar_filtros
@@ -3569,7 +3983,8 @@ def _com_loja(loja, acao):
          compra.ler_livro, compra.livro_vazio, compra.criar_ordem,
          compra.comprar_uma, comum.jogo_em_foco, comum.sem_foco,
          comum.relatar, comum.progresso, historico.registrar,
-         filtros.grau, filtros.encantamento, filtros.limpar) = reais
+         filtros.grau, filtros.encantamento, filtros.limpar,
+         compra.guardar_tela_do_painel) = reais
         comum.zerar_contadores()
 
 
@@ -3727,6 +4142,31 @@ checar('e nao grava nada no historico', not _reg, str(_reg))
 checar('mercado desconhecido devolve erro em vez de clicar',
        'erro' in comprador.comprar('Narnia', []),
        str(comprador.comprar('Narnia', [])))
+
+# "NAO DEU PARA LER O LIVRO" GUARDA O PAINEL. Em todo item, mesmo esperando o
+# livro chegar, so se explica vendo o que estava na tela
+_loja = Loja({'Broadsword': []})
+_loja.livro_vazio = lambda: False
+_r, _ = _com_loja(_loja, lambda: comprador.comprar_linha(
+    _linha('Broadsword', 'T6.0', 900, 2000, 2), 'Thetford', 0.2, lucro.TAXA_PADRAO))
+
+checar('livro que nao deu para ler guarda o print do painel',
+       'nao deu para ler o livro' in _r['motivo'] and _loja.prints == ['Broadsword_T6.0'],
+       f'{_r["motivo"]} {_loja.prints}')
+
+_loja = Loja({'Broadsword': []})
+_r, _ = _com_loja(_loja, lambda: comprador.comprar_linha(
+    _linha('Broadsword', 'T6.0', 900, 2000, 2), 'Thetford', 0.2, lucro.TAXA_PADRAO))
+
+checar('e ninguem vendendo nao e falha: sem print',
+       _r['motivo'] == 'ninguem vendendo' and not _loja.prints, f'{_r["motivo"]} {_loja.prints}')
+
+ajustes.definir('modo_de_compra', _modo_antes_do_laco)
+
+# O PADRAO E SEMPRE ORDEM: tres unidades de um item que o automatico mandaria
+# para a compra na hora vao num pedido de compra so
+checar('o modo de compra padrao e sempre ordem',
+       ajustes.PADRAO['modo_de_compra'] == 'ordem', str(ajustes.PADRAO.get('modo_de_compra')))
 
 
 # ============================================================
@@ -4063,16 +4503,23 @@ checar('e o plano compra menos quando a venda e por ordem',
 _linha_ordem = _linha('Broadsword', 'T6.0', 900, 2000, 2)
 _linha_ordem['venda_por_ordem'] = True
 
-_r, _reg = _com_loja(Loja({'Broadsword': [(900, 2)]}, dialogo_mente={'Broadsword': 1470}),
-                     lambda: comprador.comprar_linha(_linha_ordem, 'Thetford', 0.2,
-                                                     lucro.TAXA_PADRAO))
+# o dialogo so existe na compra na hora: duas unidades, no automatico
+_modo_antes = ajustes.atuais()['modo_de_compra']
+ajustes.definir('modo_de_compra', 'smart')
 
-checar('o dialogo da compra e julgado pelo caminho da venda da linha',
-       _r['unidades'] == 0 and not _reg, str(_r))
+try:
+    _r, _reg = _com_loja(Loja({'Broadsword': [(900, 2)]}, dialogo_mente={'Broadsword': 1470}),
+                         lambda: comprador.comprar_linha(_linha_ordem, 'Thetford', 0.2,
+                                                         lucro.TAXA_PADRAO))
 
-_r, _ = _com_loja(Loja({'Broadsword': [(900, 2)]}, dialogo_mente={'Broadsword': 1470}),
-                  lambda: comprador.comprar_linha(_linha('Broadsword', 'T6.0', 900, 2000, 2),
-                                                  'Thetford', 0.2, lucro.TAXA_PADRAO))
+    checar('o dialogo da compra e julgado pelo caminho da venda da linha',
+           _r['unidades'] == 0 and not _reg, str(_r))
+
+    _r, _ = _com_loja(Loja({'Broadsword': [(900, 2)]}, dialogo_mente={'Broadsword': 1470}),
+                      lambda: comprador.comprar_linha(_linha('Broadsword', 'T6.0', 900, 2000, 2),
+                                                      'Thetford', 0.2, lucro.TAXA_PADRAO))
+finally:
+    ajustes.definir('modo_de_compra', _modo_antes)
 
 checar('e o mesmo valor passa quando a venda e na hora', _r['unidades'] == 2, str(_r))
 
@@ -4587,7 +5034,7 @@ class PainelDeVenda:
 
     def __init__(self, qualidade='Good', proprio=229_798, normal=210_000,
                  unidades=4, filtro_obedece=True, restaura=True,
-                 rotulo_legivel=True, campo_confere=True):
+                 rotulo_legivel=True, campo_confere=True, total_errado=None):
         self.da_mochila = qualidade
         self.mostrada = qualidade
         self.precos = {'proprio': proprio, 'normal': normal}
@@ -4596,6 +5043,7 @@ class PainelDeVenda:
         self.restaura = restaura
         self.rotulo_legivel = rotulo_legivel
         self.campo_confere = campo_confere
+        self.total_errado = total_errado
         self.passos = []
         self.digitado = None
 
@@ -4632,9 +5080,14 @@ class PainelDeVenda:
     def ler_numero(self, regiao):
         if tuple(regiao) == tuple(cd.PRECO_VENDA):
             return self._preco_mostrado()
-        if tuple(regiao) == tuple(cd.PAINEL_TOTAL) and self.digitado:
+        if tuple(regiao) == tuple(cd.PAINEL_TOTAL_VALOR) and self.digitado:
             return int(self.digitado * self.unidades * (1 - lucro.TAXA_COM_PREMIUM))
         return None
+
+    def ler_campo(self, regiao):
+        # a leitura do painel devolve uma por limiar; a primeira pode vir errada
+        valor = self.ler_numero(regiao)
+        return [self.total_errado, valor] if valor else [None]
 
     def ler_numero_novo(self, regiao, anterior):
         valor = self.ler_numero(regiao)
@@ -4653,9 +5106,12 @@ def _listar_com(painel, de_verdade=True):
 
     reais = (comum.clicar, comum.esperar_estavel, comum.ler_texto, comum.ler_numero,
              comum.ler_numero_novo, filtros.trocar, filtros.escolher, republicar.preencher_preco,
-             historico.registrar, comum.avisar, comum.salvar_diagnostico)
+             historico.registrar, comum.avisar, comum.salvar_diagnostico,
+             compra.ler_campo, compra.ESPERA_ENTRE_LEITURAS)
 
     gravadas = []
+    compra.ler_campo = painel.ler_campo
+    compra.ESPERA_ENTRE_LEITURAS = 0
     comum.clicar = painel.clicar
     comum.esperar_estavel = lambda *a, **k: True
     comum.ler_texto = painel.ler_texto
@@ -4674,7 +5130,8 @@ def _listar_com(painel, de_verdade=True):
     finally:
         (comum.clicar, comum.esperar_estavel, comum.ler_texto, comum.ler_numero,
          comum.ler_numero_novo, filtros.trocar, filtros.escolher, republicar.preencher_preco,
-         historico.registrar, comum.avisar, comum.salvar_diagnostico) = reais
+         historico.registrar, comum.avisar, comum.salvar_diagnostico,
+         compra.ler_campo, compra.ESPERA_ENTRE_LEITURAS) = reais
         comum.zerar_contadores()
 
 
@@ -4693,6 +5150,21 @@ checar('com a pilha inteira, e vai para o historico como ordem',
        _r['unidades'] == 4 and _gravadas
        and _gravadas[0][0][1] == mercado.MERCADO_NEGRO and _gravadas[0][0][6] == historico.ORDEM,
        f'{_r} {_gravadas}')
+
+# O QUE A ORDEM RENDE: bruto menos a taxa de venda (4% com Premium, que o Total
+# do painel denuncia) e os 2,5% da ordem - os 6,5% de quem tem Premium
+checar('a ordem traz o bruto e o liquido, ja sem 4% de venda e 2,5% da ordem',
+       _r['bruto'] == 209_999 * 4
+       and _r['liquido'] == int(209_999 * 4 * (1 - lucro.TAXA_COM_PREMIUM - lucro.TAXA_DE_ORDEM))
+       and _r['taxa'] == lucro.TAXA_COM_PREMIUM, str(_r))
+
+# A LEITURA DO TOTAL QUE NAO DA NUMERO INTEIRO DE UNIDADES E DESCARTADA: o
+# "4495999" de um 449999 viraria quantidade errada calada
+_p = PainelDeVenda(total_errado=8_852_424)
+_r, _ = _listar_com(_p)
+
+checar('leitura do Total que nao fecha com preco x unidades nao vale',
+       _r['unidades'] == 4, str(_r))
 
 _p = PainelDeVenda(qualidade='Normal', proprio=229_798, normal=229_798)
 _r, _ = _listar_com(_p)
@@ -4742,8 +5214,8 @@ def _campo_com(leituras):
     fila = list(leituras)
     feito = {'digitado': [], 'regioes': set()}
     reais = (comum.clicar, comum.limpar_campo, comum.digitar, comum.capturar,
-             comum.checar_aborto, republicar.ler_campo_da_imagem,
-             republicar.ESPERA_ENTRE_LEITURAS)
+             comum.checar_aborto, compra.ler_campo_da_imagem,
+             compra.ESPERA_ENTRE_LEITURAS)
 
     def capturar(regiao):
         feito['regioes'].add(tuple(regiao))
@@ -4754,15 +5226,15 @@ def _campo_com(leituras):
     comum.digitar = feito['digitado'].append
     comum.capturar = capturar
     comum.checar_aborto = lambda: None
-    republicar.ler_campo_da_imagem = lambda bruta: fila.pop(0) if fila else [None]
-    republicar.ESPERA_ENTRE_LEITURAS = 0
+    compra.ler_campo_da_imagem = lambda bruta: fila.pop(0) if fila else [None]
+    compra.ESPERA_ENTRE_LEITURAS = 0
 
     try:
         return republicar.preencher_preco(229_789), feito
     finally:
         (comum.clicar, comum.limpar_campo, comum.digitar, comum.capturar,
-         comum.checar_aborto, republicar.ler_campo_da_imagem,
-         republicar.ESPERA_ENTRE_LEITURAS) = reais
+         comum.checar_aborto, compra.ler_campo_da_imagem,
+         compra.ESPERA_ENTRE_LEITURAS) = reais
         comum._ultima_imagem = None
         comum.zerar_contadores()
 
@@ -4803,7 +5275,7 @@ for _caminho in _campos:
     _com_folga = _Img2.new('RGB', (_tela.width + 5, _tela.height),
                            _tela.getpixel((_tela.width - 3, _tela.height // 2)))
     _com_folga.paste(_tela, (5, 0))
-    _lidos = republicar.ler_campo_da_imagem(_com_folga)
+    _lidos = compra.ler_campo_da_imagem(_com_folga)
 
     checar(f'campo em edicao lido: {_os.path.basename(_caminho)}', _valor in _lidos,
            str(_lidos))
@@ -4835,6 +5307,11 @@ checar('e o nome do menu volta para o da planilha',
        republicar.item_da_linha("Master's Great Hammer") == 'Greathammer',
        republicar.item_da_linha("Master's Great Hammer"))
 
+checar('o T8 de nome proprio vira o item do catalogo',
+       republicar.item_da_linha("| Vendetta's Wrath") == 'Great Fire Staff'
+       and republicar.item_da_linha('The Hand of Khor') == 'Greataxe',
+       republicar.item_da_linha("| Vendetta's Wrath"))
+
 checar('com o lixo do OCR em volta do nome, como no jogo',
        republicar.item_da_linha("a | Grandmaster's Spiked Gauntlets") == 'Spiked Gauntlets'
        and republicar.item_da_linha("| 1 Grandmaster's Hoarfrost Staff\n=~") == 'Hoarfrost Staff'
@@ -4845,18 +5322,20 @@ checar('item que nao reconhece fica com o texto lido',
        republicar.item_da_linha('Coisa Estranha') == 'Coisa Estranha')
 
 
-def _mochila(linhas, de_verdade=True, falhar=()):
+def _mochila(linhas, de_verdade=True, falhar=(), sem_quantidade=(), avisos=None):
     """vender() com uma lista "Sell from Inventory" de mentira.
 
     <linhas> e o que a lista mostra, de cima para baixo; a pilha que vira ordem
-    sai, e a de baixo sobe. <falhar> sao os itens que nao viram ordem."""
+    sai, e a de baixo sobe. <falhar> sao os itens que nao viram ordem, e
+    <sem_quantidade> os que viram ordem sem o Total lido. Cada pilha tem duas
+    unidades a 1.000."""
 
     lista = list(linhas)
     clicadas = []
     aberta = [None]
     reais = (republicar.abrir_linha, republicar._nome_da_linha, republicar.listar_aberto,
              mercado_negro.fechar_painel, comum.sem_foco, comum.jogo_em_foco,
-             comum.progresso, republicar.relatar)
+             comum.progresso, republicar.relatar, comum.avisar)
 
     def abrir(n):
         clicadas.append(n)
@@ -4866,9 +5345,14 @@ def _mochila(linhas, de_verdade=True, falhar=()):
     def listar(item, de_verdade=True):
         if item in falhar:
             return {'ok': False, 'preco': None, 'unidades': 0, 'motivo': 'sem preco'}
-        if de_verdade:
-            lista.pop(aberta[0])
-        return {'ok': True, 'preco': 1000, 'unidades': 1, 'motivo': ''}
+        if not de_verdade:
+            return {'ok': True, 'preco': 1000, 'unidades': None, 'motivo': 'simulacao'}
+        lista.pop(aberta[0])
+        if item in sem_quantidade:
+            return {'ok': True, 'preco': 1000, 'unidades': None, 'bruto': None,
+                    'liquido': None, 'motivo': ''}
+        return {'ok': True, 'preco': 1000, 'unidades': 2, 'taxa': lucro.TAXA_COM_PREMIUM,
+                'bruto': 2000, 'liquido': int(2000 * (1 - 0.065)), 'motivo': ''}
 
     republicar.abrir_linha = abrir
     republicar._nome_da_linha = lambda n: lista[n] if n < len(lista) else ''
@@ -4878,13 +5362,14 @@ def _mochila(linhas, de_verdade=True, falhar=()):
     comum.jogo_em_foco = lambda: True
     comum.progresso = lambda *a, **k: None
     republicar.relatar = lambda *a, **k: None
+    comum.avisar = lambda t, v=None, tom=None: (avisos if avisos is not None else []).append((t, v))
 
     try:
         return republicar.vender(de_verdade), clicadas, lista
     finally:
         (republicar.abrir_linha, republicar._nome_da_linha, republicar.listar_aberto,
          mercado_negro.fechar_painel, comum.sem_foco, comum.jogo_em_foco,
-         comum.progresso, republicar.relatar) = reais
+         comum.progresso, republicar.relatar, comum.avisar) = reais
         comum.zerar_contadores()
 
 
@@ -4897,6 +5382,21 @@ checar('cada linha vira uma ordem, e a lista esvazia',
 checar('criada a ordem, a proxima e a mesma linha - a de baixo subiu',
        _clicadas == [0, 0, 0, 0], str(_clicadas))
 
+# O TOTAL A VENDA: o que as ordens da passada rendem, ja sem as taxas
+_avisos = []
+_r, _, _ = _mochila(["Elder's Bow", "Expert's Claymore", "Master's Glaive"],
+                    sem_quantidade={'Glaive'}, avisos=_avisos)
+
+checar('a venda pela mochila soma bruto e liquido do que pos a venda',
+       _r['unidades'] == 4 and _r['bruto'] == 4000 and _r['liquido'] == 2 * int(2000 * 0.935),
+       str(_r))
+
+checar('ordem sem a quantidade lida fica fora do total, e e contada',
+       _r['ordens'] == 3 and _r['sem_quantidade'] == 1, str(_r))
+
+checar('e o total liquido aparece no aviso do canto',
+       ('Total à venda', comum.fmt(_r['liquido'])) in _avisos, str(_avisos))
+
 _r, _clicadas, _sobrou = _mochila(["Elder's Bow", "Expert's Claymore"], falhar={'Bow'})
 
 checar('pilha que nao vira ordem fica, e o bot passa para a linha de baixo',
@@ -4908,6 +5408,9 @@ _r, _clicadas, _sobrou = _mochila(["Elder's Bow", "Expert's Claymore"], de_verda
 checar('simulando, nada sai da lista - uma linha depois da outra',
        _r['ordens'] == 2 and _clicadas == [0, 1, 2] and len(_sobrou) == 2,
        f'{_r} {_clicadas}')
+
+checar('e simulando o total fica zerado, sem contar falta de quantidade',
+       _r['liquido'] == 0 and _r['sem_quantidade'] == 0 and not _r['de_verdade'], str(_r))
 
 _r, _clicadas, _ = _mochila(['Item'] * 8, de_verdade=False)
 

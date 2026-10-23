@@ -523,17 +523,25 @@ def para_varrer(grupo=None):
     return itens_de(grupo) if grupo else todos()
 
 
-def para_calcular(grupo=None):
+def para_calcular(grupo=None, so=None):
     """As triplas (item, rotulo, quantidade) que a calculadora de lucro espera.
 
     E o encaixe entre o que voce escolheu e a conta que decide a compra: o
-    lucro.montar() recebe isto e devolve a lista de compras."""
+    lucro.montar() recebe isto e devolve a lista de compras.
+
+    <so> sao os rotulos marcados para ler (ajustes 'combinacoes_lidas'); None,
+    todos. A COMPRA SO CONTA O QUE A LEITURA LE: com o T5.2 desmarcado, ele
+    entrava na conta sem nunca ter preco, e o aviso dizia "46 sem preco na
+    cidade" - 43 deles T5.2."""
 
     linhas = []
+    so = None if so is None else set(so)
 
     for item in para_varrer(grupo):
         for grau, ench in combinacoes_de(item):
             rotulo = mercado.rotulo(grau, ench)
+            if so is not None and rotulo not in so:
+                continue
             linhas.append((item, rotulo, quantidade(item, rotulo)))
 
     return linhas

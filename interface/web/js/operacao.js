@@ -198,7 +198,7 @@
       trocar(detalhe, `${fmt(r.combinacoes)} combinações em ${r.itens} itens, em ${escolhido}`);
 
       const partes = [];
-      if (r.apagar && r.tinha) partes.push(`Os ${fmt(r.tinha)} preços que já existem em ${escolhido} serão apagados antes — dá para trazer de volta.`);
+      if (r.apagar && r.tinha) partes.push(`Os ${fmt(r.tinha)} preços desses itens que já existem em ${escolhido} serão apagados antes — os outros itens ficam, e dá para trazer de volta.`);
       explica.textContent = partes.join(' ');
 
       comecar.disabled = !!app.rodando;
@@ -504,6 +504,10 @@
     const simularMercado = h('button', { class: 'botao', onclick: () => executarMercado(false) }, 'Simular');
     const venderMercado = h('button', { class: 'botao perigo-acao', onclick: () => executarMercado(true) }, 'Vender a mochila');
 
+    // O TOTAL A VENDA: o que a ultima venda pela mochila pos nas ordens, ja
+    // sem a taxa de venda e os 2,5% da ordem
+    const totalMochila = h('p', { class: 'nota', style: { margin: '12px 0 0' } });
+
     el.append(
       cartao('Vender a mochila pelo mercado',
         h('div', { class: 'linha' },
@@ -512,7 +516,8 @@
             + 'de cada linha, de cima para baixo, e cria a ordem 1 prata abaixo do menor preço da qualidade Normal — na '
             + 'frente da fila, com a pilha inteira. O que a lista mostrar é o que será vendido. Serve também para recolocar '
             + 'uma ordem que você cancelou, com o preço de agora.'),
-          simularMercado, venderMercado)),
+          simularMercado, venderMercado),
+        totalMochila),
       cartao(null, h('div', { class: 'linha' },
         campo('Margem mínima', comUnidade(margem, '%')),
         campo('Vender na hora a partir de', comUnidade(perto, '% do alvo'))),
@@ -557,7 +562,16 @@
       const tem = ultimo && ultimo.linhas && ultimo.linhas.length;
       simular.disabled = deVerdade.disabled = !tem || !!app.rodando;
       simularMercado.disabled = venderMercado.disabled = !!app.rodando;
+      if (!app.rodando) mostrarTotalMochila();
       porque.textContent = app.rodando ? 'Há uma operação em andamento.' : (tem ? '' : 'Sem carga para vender.');
+    }
+
+    async function mostrarTotalMochila() {
+      const s = await api('ultima_venda_mochila');
+      if (!s || !s.de_verdade || !s.ordens) { totalMochila.textContent = ''; return; }
+      totalMochila.textContent = `Última venda (${s.quando}): ${fmt(s.ordens)} ordens, ${fmt(s.unidades)} unidades — `
+        + `${fmt(s.bruto)} bruto, ${fmt(s.liquido)} depois das taxas.`
+        + (s.sem_quantidade ? ` ${fmt(s.sem_quantidade)} ordens sem a quantidade lida ficaram fora do total (veja o registro).` : '');
     }
 
     async function executarMercado(real) {

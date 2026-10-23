@@ -116,6 +116,21 @@ SUFIXO_PORTUGUES = {
 #region Composicao
 
 
+# ITENS CUJO GRAU 8 TEM NOME PROPRIO, sem o "Elder's" e sem o nome base. Tirado
+# da lista oficial de itens do jogo (ao-bin-dumps, formatted/items.txt): de
+# todos os itens, sao so estes tres, e so no T8.
+#
+# A busca por "Great Fire Staff" nao traz o "Vendetta's Wrath": o T8 desses
+# itens nunca aparecia na lista, e a combinacao ficava sem preco. Por isso eles
+# vao sempre pelo menu (categorias.SEMPRE_PELO_MENU), que seleciona o TIPO do
+# item com todos os graus.
+NOME_PROPRIO = {
+    ('Greataxe', 8): 'The Hand of Khor',
+    ('Great Fire Staff', 8): "Vendetta's Wrath",
+    ('Tome of Spells', 8): "Rosalia's Diary",
+}
+
+
 def prefixo(grau):
     """"Master's" para o grau 6. String vazia se o grau nao for conhecido."""
 
@@ -126,7 +141,11 @@ def completo(base, grau):
     """O nome como ele aparece na tela do jogo, em ingles.
 
     'Broadsword' + 6 -> "Master's Broadsword"
+    'Great Fire Staff' + 8 -> "Vendetta's Wrath"   (NOME_PROPRIO)
     """
+
+    if (base, grau) in NOME_PROPRIO:
+        return NOME_PROPRIO[(base, grau)]
 
     p = prefixo(grau)
 

@@ -78,7 +78,7 @@
         ['rede_ativa', 'Ler os preços pela rede', 'Exato e sem OCR. Os preços ficam só neste computador.', 'chave'],
       ], fim: () => montarSituacaoRede() },
       { titulo: 'Ao ler', linhas: [
-        ['apagar_antes', 'Apagar os preços do mercado antes', 'Uma cópia fica guardada.', 'chave'],
+        ['apagar_antes', 'Apagar antes os preços dos itens a ler', 'Só os itens desta leitura; os outros grupos ficam. Uma cópia fica guardada.', 'chave'],
         ['repescar', 'Reler o que faltar, no fim', 'O que volta vazio costuma ser lentidão da tela.', 'chave'],
         ['amostras', 'Conferir combinações sorteadas', 'Relê algumas no fim e compara. Zero desliga.', 'numero', ''],
       ] },

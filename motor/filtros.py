@@ -64,6 +64,15 @@ def _regiao_opcoes(barra):
             cd.CMP_DETECCAO_OPCAO_Y + cd.CMP_DETECCAO_MEIA_ALTURA)
 
 
+def _ate_a_opcao(regiao, opcao):
+    """A faixa da lista aberta, da primeira opcao ate a que vai ser clicada."""
+
+    x1, y1, x2, y2 = regiao
+
+    return (min(x1, opcao['x'] - 40), y1, max(x2, opcao['x'] + 40),
+            max(y2, opcao['y'] + 13))
+
+
 def escolher(barra, opcao, deteccao=None, afastar=True):
     """Abre um dropdown e clica numa opcao. True se a escolha foi feita.
 
@@ -106,7 +115,12 @@ def escolher(barra, opcao, deteccao=None, afastar=True):
             abriu = comum.esperar_mudanca(regiao, fechado, ESPERA_DROPDOWN)
 
             if abriu:
-                comum.esperar_estavel(regiao, ESPERA_DROPDOWN)
+                # A LISTA INTEIRA PARADA, ATE A OPCAO, NO RITMO LENTO. Tres
+                # quadros iguais no ritmo rapido sao ~50 ms, menos que a
+                # animacao da lista abrindo: so a primeira opcao parecia parada,
+                # a lista ainda descia, e o clique no T5 caia no T4.
+                comum.esperar_estavel(_ate_a_opcao(regiao, opcao), ESPERA_DROPDOWN,
+                                      intervalo=comum.SONDAGEM_LENTA)
             else:
                 comum.contar('dropdown_perdidos')
 

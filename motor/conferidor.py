@@ -834,10 +834,14 @@ def varrer(local, itens, combinacoes=None, salvar_a_cada=10,
     # APAGAR ANTES. Sem isto, parar no meio deixa o mercado com precos novos em
     # alguns itens e antigos nos demais, sem como distinguir - e a calculadora
     # trata os dois igual.
+    #
+    # SO OS ITENS QUE VAO SER LIDOS. Apagar o mercado inteiro levava junto os
+    # outros grupos do catalogo: ler Armors no Mercado Negro apagava o Mage
+    # Cape-Bag lido antes, e ele sumia da compra.
     if apagar_antes:
-        saiu = mercado.apagar_mercado(local)
+        saiu = mercado.apagar_mercado(local, itens)
         if saiu:
-            relatar(f'{saiu} precos anteriores de "{local}" foram apagados')
+            relatar(f'{saiu} precos anteriores destes itens em "{local}" foram apagados')
 
     # A TELA COMECA LIMPA. O jogo guarda busca, grau e encantamento de uma sessao
     # para a outra: se a ultima coisa que voce fez foi procurar um T8.3, a

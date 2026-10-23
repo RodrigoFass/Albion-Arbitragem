@@ -1267,6 +1267,51 @@ def apontar(pos):
     win32api.SetCursorPos((pos['x'], pos['y']))
 
 
+def rolar(pos, cliques):
+    """Gira a roda do mouse em cima de <pos>. <cliques> positivo desce a lista.
+
+    Um evento por clique da roda, com folga entre eles: varios cliques num
+    evento so, o jogo pode contar como um."""
+
+    checar_aborto()
+
+    win32api.SetCursorPos((pos['x'], pos['y']))
+    time.sleep(ESPERA_MOUSE)
+
+    for _ in range(abs(int(cliques))):
+        checar_aborto()
+        win32api.mouse_event(win32con.MOUSEEVENTF_WHEEL, 0, 0,
+                             -120 if cliques > 0 else 120, 0)
+        time.sleep(ESPERA_MOUSE)
+
+
+def arrastar(de, para, passos=10):
+    """Segura o botao em <de>, leva o cursor ate <para> e solta.
+
+    Em passos, e nao num salto: o jogo so arrasta o que viu o cursor percorrer.
+    O botao e SEMPRE solto - um F12 no meio deixaria o mouse preso apertado."""
+
+    checar_aborto()
+
+    win32api.SetCursorPos((de['x'], de['y']))
+    time.sleep(ESPERA_MOUSE)
+    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, de['x'], de['y'], 0, 0)
+
+    try:
+        time.sleep(ESPERA_BOTAO)
+
+        for i in range(1, passos + 1):
+            x = round(de['x'] + (para['x'] - de['x']) * i / passos)
+            y = round(de['y'] + (para['y'] - de['y']) * i / passos)
+            win32api.SetCursorPos((x, y))
+            time.sleep(0.02)
+
+        time.sleep(ESPERA_BOTAO)
+
+    finally:
+        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, para['x'], para['y'], 0, 0)
+
+
 _teclado = Controller()
 
 

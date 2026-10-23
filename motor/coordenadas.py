@@ -112,6 +112,7 @@ VND_QUAL_NORMAL = {'x': 825, 'y': 430}
 # Termina antes da etiqueta verde "% above average", que comeca em x=705.
 VND_PRECO_VALOR = (599, 619, 703, 641)
 
+
 #endregion
 
 #region Tela de COMPRA
@@ -178,15 +179,10 @@ CMP_DIALOGO_COMPRA = (780, 428, 1190, 495)
 # ATENCAO: O PAINEL DO MERCADO NEGRO TEM MENOS OPCOES. La so existem "Vender" e
 # "Pedido de Venda"; na cidade sao quatro, e cada uma empurra a de baixo 27 px.
 # Usar a mesma coordenada nas duas telas clica na acao errada.
-# Onde clicar na LISTA para abrir o painel de um item: em cima do nome, e nao no
-# botao Comprar - o botao compra uma unidade, o nome abre o painel com o livro de
-# ofertas e o pedido de compra.
-#
-# DERIVADO do enquadramento do nome, nao medido. Se estiver errado, o painel nao
-# abre e a compra para dizendo isso - o lado seguro do erro.
-PAINEL_ABRIR = {'x': 780, 'y': 430}
+# O painel de um item abre pelo botao "Buy" da linha (CMP_COMPRAR_1): ele nao
+# compra nada, so abre o painel. Quem compra e o Buy de dentro do painel.
 
-PAINEL_VENDER          = {'x': 562, 'y': 453}
+PAINEL_VENDER         = {'x': 562, 'y': 453}
 PAINEL_COMPRAR         = {'x': 562, 'y': 481}
 PAINEL_PEDIDO_DE_VENDA = {'x': 562, 'y': 508}
 PAINEL_PEDIDO_DE_COMPRA = {'x': 562, 'y': 535}
@@ -201,6 +197,11 @@ PAINEL_QTD_MAIS  = {'x': 862, 'y': 594}
 PAINEL_QTD_BARRA = {'x': 710, 'y': 594}
 PAINEL_QTD_VALOR = (560, 562, 600, 585)
 
+# A bolha com o numero em cima da barra (o "1" quando o painel abre). MEDIDO num
+# print do pedido de compra em 1920x1080: clicando nela, o numero e digitado.
+# A bolha ANDA com a barra - a quantidade e conferida pelo Total.
+PAINEL_QTD_NUMERO = {'x': 575, 'y': 573}
+
 # Preco: mesma coisa, uma linha abaixo.
 PAINEL_PRECO_MENOS = {'x': 566, 'y': 629}
 PAINEL_PRECO_MAIS  = {'x': 858, 'y': 629}
@@ -211,7 +212,21 @@ PAINEL_PRECO_VALOR = (600, 618, 700, 642)
 PAINEL_TAXA  = (550, 648, 780, 672)
 PAINEL_TOTAL = (550, 715, 720, 742)
 
+# So o numero do Total, depois do icone da moeda (x 552-565), para a leitura do
+# painel: MEDIDO no print do pedido de compra, "Total: 4" com o 4 em x~572.
+PAINEL_TOTAL_VALOR = (566, 717, 780, 740)
+
 PAINEL_CRIAR  = {'x': 881, 'y': 729}
+
+# A CONFIRMACAO DO PEDIDO DE COMPRA, quando o jogo pergunta: "Do you really
+# want to place a buy order with 7 <item> that pays 118,998 each? You have to
+# pay 853,811". MEDIDO num print em 1920x1080. A altura dos botoes muda com o
+# numero de linhas (o aviso "YOU CANNOT EQUIP THIS ITEM" acrescenta uma), por
+# isso o Yes e achado pela cor, numa coluna da borda esquerda dele.
+DIALOGO_ORDEM_TEXTO = (760, 440, 1170, 525)
+DIALOGO_ORDEM_COLUNA = (829, 470, 831, 660)
+DIALOGO_ORDEM_SIM_X = 858
+DIALOGO_ORDEM_NAO_X = 1060
 PAINEL_FECHAR = {'x': 937, 'y': 305}
 
 # --- O LIVRO DE OFERTAS ---------------------------------------------------
@@ -232,6 +247,28 @@ def venda_preco(n):
     y = LIVRO_PRIMEIRA_Y + n * LIVRO_PASSO
 
     return (1000, y - 11, 1095, y + 11)
+
+
+def venda_preco_numero(n):
+    """So os digitos do preco da n-esima linha, depois do icone da moeda.
+
+    MEDIDO no print do painel do Hoarfrost Staff: a moeda vai de x~1008 a 1016
+    e o numero comeca em 1022. Com a moeda no recorte o OCR lia "45229,798"."""
+
+    y = LIVRO_PRIMEIRA_Y + n * LIVRO_PASSO
+
+    return (1019, y - 11, 1095, y + 11)
+
+
+# A barrinha de rolar do livro de venda: uma coluna em cima do cabo dela, que
+# e cinza-azulado escuro. MEDIDO nos prints do Enigmatic Staff: o cabo fica em
+# y 374-404 no topo da lista e em 407-437 depois de descer.
+LIVRO_BARRA = (1193, 350, 1195, 522)
+
+
+# O livro de "Pedidos de venda" inteiro, numa captura so.
+LIVRO_VENDA = (1000, LIVRO_PRIMEIRA_Y - 11, 1185,
+               LIVRO_PRIMEIRA_Y + (LIVRO_LINHAS - 1) * LIVRO_PASSO + 11)
 
 
 def venda_quantidade(n):

@@ -200,12 +200,27 @@ def comprar_linha(linha, origem, margem, taxa, gasto_ate_agora=0,
                 return saida
 
             painel = True
-            ofertas = compra.ler_livro()
+
+            # ROLA O LIVRO ate a quantidade da linha, ou ate passar do preco
+            # que ainda paga a margem: so cabem seis ofertas na tela
+            ofertas = compra.ler_livro(
+                ate_unidades=linha['quantidade'],
+                ate_preco=compra.preco_maximo(
+                    linha['venda'], margem, taxa,
+                    ordem_na_venda=linha.get('venda_por_ordem', False)))
 
         if not ofertas:
             saida['motivo'] = ('ninguem vendendo' if compra.livro_vazio()
                                else 'nao deu para ler o livro')
             comum.contar('livros_vazios')
+
+            # O QUE ESTAVA NA TELA. "Nao deu para ler o livro" em todo item,
+            # mesmo esperando o livro chegar, so se explica vendo o painel
+            if painel and saida['motivo'] != 'ninguem vendendo':
+                print_ = compra.guardar_tela_do_painel(f'{item}_{rot}')
+                if print_:
+                    saida['motivo'] += f' (print em {print_})'
+
             return saida
 
         quanto = linha['quantidade']
@@ -406,7 +421,7 @@ def comprar(origem, linhas=None, margem=None, taxa=None, teto_de_prata=None,
 
     if linhas is None:
         from motor import catalogo as cat
-        linhas, _ = lucro.montar(cat.para_calcular(), origem, destino,
+        linhas, _ = lucro.montar(cat.para_calcular(so=conf.get('combinacoes_lidas')), origem, destino,
                                  margem_minima=margem, taxa=taxa,
                                  teto=teto_de_prata)
 

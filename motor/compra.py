@@ -46,7 +46,11 @@
 #
 # Antes de alterar: python -m pyflakes compra.py
 
+import math
+import os
 import time
+
+from PIL import Image, ImageOps
 
 from motor import comum
 from motor import coordenadas as cd
@@ -116,35 +120,303 @@ def preco_maximo(venda, margem, taxa=lucro.TAXA_PADRAO, por_ordem=True,
 #region O livro de ofertas
 
 
-def ler_livro(linhas=LINHAS_DO_LIVRO):
+# A leitura dos numeros do livro: (limiar, modo do tesseract, ampliacao), sobre
+# o recorte com o contraste esticado. Modo 7 e linha, 10 e caractere solto - o
+# "1" da quantidade quase so sai nele. Vale o numero que juntar VOTOS_MINIMOS
+# leituras; a votacao para quando um numero chega la, e o caso comum custa tres.
+# Medido no print do painel do Master's Enigmatic Staff, com o texto mais claro
+# (~75 de cinza) que nos prints de antes: sem esticar o contraste, o 118,499
+# nao saia em limiar nenhum.
+VARIANTES_DO_LIVRO = ((110, 7, 4), (150, 7, 4), (130, 10, 3), (110, 10, 4),
+                      (170, 7, 4), (90, 7, 3), (150, 10, 4), (130, 7, 4))
+VOTOS_MINIMOS = 3
+CONFIG_DO_LIVRO = '--psm {} --oem 1 -c tessedit_char_whitelist=0123456789,'
+
+# A LINHA DESTACADA: abrindo o painel pelo Buy, o jogo seleciona a oferta mais
+# barata e pinta a linha de verde, com o numero amarelo - claro sobre escuro, o
+# contrario das outras. Mediana de cinza abaixo disto e linha destacada, lida
+# invertida. No print: 104 na destacada, 170 a 190 nas outras.
+MEDIANA_DA_DESTACADA = 140
+
+# Uma linha sem oferta e bege liso; com numero, o traco e o fundo distam mais
+# de 70 tons de cinza (95 na destacada, mais de 100 nas outras).
+CONTRASTE_MINIMO = 40
+
+
+def _preparar_do_livro(img):
+    cinza = img.convert('L')
+    valores = sorted(cinza.getdata())
+
+    if valores[len(valores) // 2] < MEDIANA_DA_DESTACADA:
+        cinza = ImageOps.invert(cinza)
+
+    return ImageOps.autocontrast(cinza)
+
+
+def ler_inteiro(img, minimo, maximo):
+    """O numero de um recorte, ou None quando os limiares nao concordam."""
+
+    cinza = _preparar_do_livro(img)
+    votos = {}
+    prontas = {}
+
+    for limiar, psm, escala in VARIANTES_DO_LIVRO:
+
+        if (limiar, escala) not in prontas:
+            preto = cinza.point(lambda v, limiar=limiar: 0 if v < limiar else 255)
+            grande = preto.resize((preto.width * escala, preto.height * escala),
+                                  Image.LANCZOS)
+            prontas[(limiar, escala)] = ImageOps.expand(grande, border=20, fill=255)
+
+        texto, _ = comum._reconhecer_com_confianca(prontas[(limiar, escala)],
+                                                   CONFIG_DO_LIVRO.format(psm))
+        digitos = ''.join(c for c in texto if c.isdigit())
+
+        if digitos and minimo <= int(digitos) <= maximo:
+            valor = int(digitos)
+            votos[valor] = votos.get(valor, 0) + 1
+
+            if votos[valor] >= VOTOS_MINIMOS:
+                return valor
+
+    # sem chegar la, nao vale: um numero errado aqui vira compra errada calada
+    return None
+
+
+def _recorte_do_livro(tela, regiao):
+    x1, y1, x2, y2 = regiao
+    bx, by = cd.LIVRO_VENDA[0], cd.LIVRO_VENDA[1]
+    return tela.crop((x1 - bx, y1 - by, x2 - bx, y2 - by))
+
+
+def _linha_vazia(img):
+    """Bege liso, sem numero: a linha nao tem oferta, o livro acabou.
+
+    PELO CONTRASTE, e nao por "sem traco escuro": a linha destacada tem o
+    numero CLARO sobre fundo escuro, e passava por vazia - a compra esperava o
+    livro chegar, nunca via, e fechava o painel sem comprar."""
+
+    valores = img.convert('L').getdata()
+
+    return max(valores) - min(valores) < CONTRASTE_MINIMO
+
+
+# Limite esperando o livro chegar do servidor depois de o painel abrir.
+ESPERA_LIVRO = 3.00
+
+
+def _esperar_livro():
+    """Espera a primeira oferta aparecer no livro. False se ele ficou vazio.
+
+    O PAINEL ABRE ANTES DO LIVRO. As ofertas chegam do servidor um instante
+    depois, e o painel fica com o livro em branco nesse meio tempo - parado, e
+    portanto "estavel". Lendo ali, a primeira linha saia vazia, o livro era
+    dado por acabado, e a compra registrava "nao deu para ler o livro" em
+    todo item: abria o painel e fechava."""
+
+    fim = time.monotonic() + ESPERA_LIVRO
+
+    while time.monotonic() < fim:
+
+        comum.checar_aborto()
+
+        tela = comum.capturar(cd.LIVRO_VENDA)
+
+        if not _linha_vazia(_recorte_do_livro(tela, cd.venda_preco_numero(0))):
+            comum.esperar_estavel(cd.LIVRO_VENDA, ESPERA_CAMPO,
+                                  intervalo=comum.SONDAGEM_LENTA)
+            return True
+
+        time.sleep(0.10)
+
+    comum.contar('livro_nao_chegou')
+
+    return False
+
+
+# --- descer o livro ----------------------------------------------------------
+#
+# SO CABEM SEIS OFERTAS NA TELA, e no print do Enigmatic Staff eram seis de uma
+# unidade: vinte unidades iam ate 139.986, bem abaixo da primeira tela. Sem
+# descer, o pedido saia com seis.
+#
+# PELO CABO DA BARRA, ARRASTADO. A roda do mouse nao mexia o livro no jogo; o
+# cabo da barrinha a direita dele, segurado e puxado, mexe.
+#
+# CADA TELA NOVA E ENCAIXADA NA ANTERIOR PELAS OFERTAS LIDAS, e nao pela imagem:
+# a lista nao anda linha a linha (no print, as linhas desceram 3 px), e o
+# degrade do fundo pesa mais que os digitos numa comparacao de pixels. O livro e
+# ordenado pelo preco, entao a tela nova comeca por um pedaco do fim da anterior.
+
+MAXIMO_DE_DESCIDAS = 20
+
+# Quanto puxar o cabo, em pixels. Comeca curto; se a lista nao mexer, dobra; se
+# pular mais que uma tela, volta e puxa a metade.
+PASSO_DO_CABO = 8
+PASSO_MAXIMO_DO_CABO = 48
+
+
+def cabo_da_barra(coluna):
+    """O y (dentro da captura) do meio do cabo da barra, ou None se nao ha barra.
+
+    O cabo e cinza-azulado escuro (azul acima do vermelho); o trilho e bege e
+    as setas das pontas sao laranja. Sem barra, o livro cabe inteiro na tela."""
+
+    px = coluna.load()
+    linhas = [y for y in range(coluna.height)
+              if any(px[x, y][2] - px[x, y][0] >= 6 and max(px[x, y]) < 130
+                     for x in range(coluna.width))]
+
+    # o maior trecho continuo: o cursor do mouse perto da barra tambem tem pixel
+    # escuro, mas solto
+    trechos, atual = [], []
+
+    for y in linhas:
+        if atual and y - atual[-1] > 2:
+            trechos.append(atual)
+            atual = []
+        atual.append(y)
+
+    trechos.append(atual)
+    maior = max(trechos, key=len)
+
+    if len(maior) < 10:
+        return None
+
+    return (maior[0] + maior[-1]) // 2
+
+
+def sobreposicao(lidas, novas):
+    """Quantas das <novas> ja estavam no fim das <lidas>.
+
+    O MAIOR ENCAIXE. Com ofertas iguais em sequencia (118.499 x1 duas vezes) mais
+    de um encaixe serve; o maior conta menos ofertas novas - a ordem sai com
+    menos unidades que podia, e nunca com mais."""
+
+    for k in range(min(len(lidas), len(novas)), 0, -1):
+        if lidas[-k:] == novas[:k]:
+            return k
+
+    return 0
+
+
+def _ler_tela(tela):
+    """([(preco, quantidade)] das linhas visiveis, True se achou o fim do livro)."""
+
+    ofertas = []
+
+    for n in range(LINHAS_DO_LIVRO):
+
+        comum.checar_aborto()
+
+        recorte = _recorte_do_livro(tela, cd.venda_preco_numero(n))
+        preco = ler_inteiro(recorte, comum.PRECO_MIN, comum.PRECO_MAX)
+
+        if preco is None:
+            if _linha_vazia(recorte):
+                return ofertas, True
+            comum.contar('preco_do_livro_ilegivel')
+            continue
+
+        quantidade = ler_inteiro(
+            _recorte_do_livro(tela, cd.venda_quantidade(n)), 1, 999_999)
+
+        if quantidade is None:
+            comum.contar('quantidade_ilegivel')
+            quantidade = 1
+
+        ofertas.append((preco, int(quantidade)))
+
+    return ofertas, False
+
+
+def _puxar_cabo(pixels):
+    """Arrasta o cabo da barra <pixels> para baixo (negativo, para cima). False
+    se nao ha barra."""
+
+    centro = cabo_da_barra(comum.capturar(cd.LIVRO_BARRA))
+
+    if centro is None:
+        return False
+
+    x = (cd.LIVRO_BARRA[0] + cd.LIVRO_BARRA[2]) // 2
+    y = cd.LIVRO_BARRA[1] + centro
+
+    comum.arrastar({'x': x, 'y': y}, {'x': x, 'y': y + pixels})
+
+    # o cursor sai de cima do livro: a linha embaixo dele fica escurecida
+    comum.apontar(cd.MOUSE_DESCANSO)
+    comum.esperar_estavel(cd.LIVRO_VENDA, ESPERA_CAMPO,
+                          intervalo=comum.SONDAGEM_LENTA)
+
+    return True
+
+
+def ler_livro(ate_unidades=None, ate_preco=None):
     """Le "Pedidos de venda". Devolve [(preco, quantidade)], de baixo para cima.
 
-    Para na primeira linha que nao der para ler: a lista e continua e ordenada,
-    entao uma linha vazia quer dizer que o livro acabou. Insistir depois disso
-    seria ler o fundo do painel.
+    DESCE O LIVRO ate juntar <ate_unidades> ou passar de <ate_preco> - o que a
+    linha quer comprar e o mais caro que ainda paga a margem. Sem os dois, so a
+    primeira tela.
+
+    PELA LEITURA POR VOTACAO (ler_inteiro), uma captura por tela. A leitura de
+    antes falhava de tres jeitos nos prints do jogo:
+
+      - a quantidade passava pelo numero_valido, que recusa menos de 100 - e
+        toda quantidade do livro (1, 2, 5) virava 1;
+      - parava na primeira linha ilegivel, achando que o livro tinha acabado;
+      - a primeira linha, destacada pelo Buy, passava por vazia.
+
+    O livro acaba na primeira linha VAZIA. Linha com numero que nao deu para ler
+    e pulada: a ordem sai com menos unidades que podia, e nunca com mais.
 
     Quantidade ilegivel com preco legivel vira 1, e nao zero. Um vira uma compra
     a menos que a possivel; zero faria a linha inteira desaparecer da conta e a
     ordem nasceria pequena demais - e o erro que some e sempre pior."""
 
-    ofertas = []
+    if not _esperar_livro():
+        return []
 
-    for n in range(linhas):
+    ofertas, fim = _ler_tela(comum.capturar(cd.LIVRO_VENDA))
+    passo = PASSO_DO_CABO
 
-        comum.checar_aborto()
+    for _ in range(MAXIMO_DE_DESCIDAS):
 
-        preco = comum.ler_numero(cd.venda_preco(n))
-
-        if preco is None:
+        if fim or not ofertas or (ate_unidades is None and ate_preco is None):
             break
 
-        quantidade = comum.ler_numero(cd.venda_quantidade(n))
+        if ate_unidades is not None and sum(q for _, q in ofertas) >= ate_unidades:
+            break
 
-        if quantidade is None or quantidade < 1:
-            comum.contar('quantidade_ilegivel')
-            quantidade = 1
+        if ate_preco is not None and max(p for p, _ in ofertas) > ate_preco:
+            break
 
-        ofertas.append((preco, int(quantidade)))
+        if not _puxar_cabo(passo):
+            # sem barra: o livro cabe inteiro na tela, e ja foi lido
+            break
+
+        novas, fim = _ler_tela(comum.capturar(cd.LIVRO_VENDA))
+        k = sobreposicao(ofertas, novas)
+
+        if not novas[k:]:
+            # A LISTA NAO MEXEU: o puxao foi curto, ou o livro acabou
+            if passo >= PASSO_MAXIMO_DO_CABO:
+                break
+            passo *= 2
+            continue
+
+        if k == 0:
+            # PULOU MAIS QUE UMA TELA: o que ficou entre as duas nao foi lido.
+            # Volta e puxa a metade; sem como encolher mais, para com o que tem
+            comum.contar('livro_rolou_demais')
+            _puxar_cabo(-passo)
+            if passo <= 1:
+                break
+            passo //= 2
+            fim = False
+            continue
+
+        ofertas.extend(novas[k:])
 
     return ofertas
 
@@ -195,6 +467,94 @@ def preencher(campo, regiao, valor):
 
         if lido == int(valor):
             return True
+
+        comum.contar('campos_refeitos')
+
+    return False
+
+
+# Leituras de um campo antes de redigitar, e o intervalo entre elas - meio
+# piscar do cursor de texto.
+LEITURAS_DO_CAMPO = 4
+ESPERA_ENTRE_LEITURAS = 0.15
+
+# A leitura de um numero do painel do item: (limiar, modo do tesseract,
+# ampliacao). O fundo bege fica em ~184 de cinza e o traco em ~46; nos prints
+# do jogo 130 e 150 acertaram todos, 110 quase todos. O modo palavra (8) e para
+# o numero de um digito so - o preco 3 de um Scraps of Hide -, que o modo linha
+# (7) perde. As ampliacoes 3 e 5 sao do 449999 de um Guardian Boots: limpo na
+# tela, lido "4495999" pelas quatro primeiras, e certo nas outras duas.
+VARIANTES_DO_CAMPO = ((130, 7, 4), (150, 7, 4), (110, 7, 4), (130, 8, 4),
+                      (130, 7, 3), (130, 7, 5))
+CONFIG_DO_CAMPO = '--psm {} --oem 1 -c tessedit_char_whitelist=0123456789'
+
+
+def ler_campo_da_imagem(bruta):
+    """Os numeros que uma captura de um campo do painel pode estar mostrando.
+
+    O CAMPO EM EDICAO NAO E A LISTA. O numero e marrom sobre um bege em
+    degrade, com o cursor de texto branco piscando colado no ultimo digito, e o
+    preparo do ler_numero - feito para a lista - lia "83384" como "8338400" ou
+    perdia o "1" de "126981" (dados/registros/falhas_venda_mochila). Aqui o
+    traco escuro vira preto e todo o resto, cursor incluso, vira fundo.
+
+    Devolve uma leitura por limiar: quem chama confere se ALGUMA bate com o que
+    esperava. Um limiar errar para o numero exato que se esperava nao acontece
+    por acaso - e por isso aqui nao ha a faixa do numero_valido, que recusa
+    menos de 100: um Scraps of Hide custa 3."""
+
+    cinza = bruta.convert('L')
+    lidos = []
+    prontas = {}
+
+    for limiar, psm, escala in VARIANTES_DO_CAMPO:
+
+        if (limiar, escala) not in prontas:
+            preto = cinza.point(lambda v, limiar=limiar: 0 if v < limiar else 255)
+            grande = preto.resize((preto.width * escala, preto.height * escala),
+                                  Image.LANCZOS)
+            prontas[(limiar, escala)] = ImageOps.expand(grande, border=20, fill=255)
+
+        texto, _ = comum._reconhecer_com_confianca(prontas[(limiar, escala)],
+                                                   CONFIG_DO_CAMPO.format(psm))
+        digitos = ''.join(c for c in texto if c.isdigit())
+        lidos.append(int(digitos) if digitos else None)
+
+    return lidos
+
+
+def ler_campo(regiao):
+    """ler_campo_da_imagem() de uma regiao da tela, guardado para diagnostico."""
+
+    bruta = comum.capturar(regiao)
+    lidos = ler_campo_da_imagem(bruta)
+
+    comum._ultima_imagem = bruta
+    comum._ultimo_texto = ' / '.join(str(v) for v in lidos)
+
+    return lidos
+
+
+def preencher_conferindo(campo, regiao, valor):
+    """Digita <valor> num campo do painel e CONFERE lendo de volta.
+
+    Como o preencher(), mas pela leitura do campo em edicao, e lendo VARIAS
+    VEZES antes de digitar de novo: o cursor de texto pisca dentro do numero, e
+    um quadro com ele aceso pode sair com um digito a mais. Redigitar por causa
+    disso so trocava um quadro ruim por outro."""
+
+    for _ in range(TENTATIVAS_DE_CAMPO):
+
+        comum.checar_aborto()
+
+        comum.clicar(campo)
+        comum.limpar_campo()
+        comum.digitar(str(int(valor)))
+
+        for _ in range(LEITURAS_DO_CAMPO):
+            if int(valor) in ler_campo(regiao):
+                return True
+            time.sleep(ESPERA_ENTRE_LEITURAS)
 
         comum.contar('campos_refeitos')
 
@@ -322,12 +682,14 @@ def decidir(ofertas, venda, margem, quantidade_maxima, taxa=lucro.TAXA_PADRAO,
 def abrir_painel():
     """Abre o painel do primeiro item da lista. True se ele apareceu.
 
-    Clica no NOME, e nao no botao Comprar: o botao compra uma unidade na hora, o
-    nome abre o painel com o livro de ofertas e as quatro acoes."""
+    PELO BOTAO "BUY" DA LINHA. Ele nao compra nada: abre o painel com o livro de
+    ofertas e as quatro acoes - quem compra e o Buy DE DENTRO do painel. Antes o
+    bot clicava no nome, numa posicao derivada e nunca medida; o Buy da linha e
+    o primeiro clique da compra na hora, medido e calibrado."""
 
     antes = comum.assinatura(cd.venda_preco(0))
 
-    comum.clicar(cd.PAINEL_ABRIR)
+    comum.clicar(cd.CMP_COMPRAR_1)
 
     if comum.esperar_mudanca(cd.venda_preco(0), antes, ESPERA_CAMPO):
         comum.esperar_estavel(cd.venda_preco(0), ESPERA_CAMPO,
@@ -343,6 +705,118 @@ def fechar_painel():
     comum.clicar(cd.PAINEL_FECHAR)
 
 
+def total_da_ordem(preco, unidades):
+    """O "Total" que o painel mostra: o reservado mais a taxa de ordem.
+
+    A taxa e arredondada PARA CIMA - 3 de prata x 1 mostra taxa 1 e Total 4."""
+
+    valor = int(preco) * int(unidades)
+
+    return valor + math.ceil(valor * lucro.TAXA_DE_ORDEM)
+
+
+def conferir_total(previsto, tolerancia=0.01):
+    """(ok, leituras): o Total da tela bate com o <previsto>?"""
+
+    comum.esperar_estavel(cd.PAINEL_TOTAL_VALOR, ESPERA_CAMPO,
+                          intervalo=comum.SONDAGEM_LENTA)
+
+    folga = max(1, previsto * tolerancia)
+    lidos = []
+
+    for _ in range(LEITURAS_DO_CAMPO):
+        lidos = ler_campo(cd.PAINEL_TOTAL_VALOR)
+
+        if any(v is not None and abs(v - previsto) <= folga for v in lidos):
+            return True, lidos
+
+        time.sleep(ESPERA_ENTRE_LEITURAS)
+
+    return False, lidos
+
+
+def _botoes_do_dialogo(coluna):
+    """O y do meio dos botoes Yes/No numa captura da coluna, ou None.
+
+    O botao e azul-escuro com borda clara; o fundo do dialogo e cinza quase
+    preto, e o painel atras e bege. Azul (b acima de r) e escuro so o botao e."""
+
+    px = coluna.load()
+    linhas = [y for y in range(coluna.height)
+              if px[0, y][2] - px[0, y][0] >= 5 and max(px[0, y]) < 120]
+
+    # o maior trecho continuo, tolerando falhas de 3 px (o texto do botao)
+    melhor, inicio, fim = None, None, None
+
+    for y in linhas + [None]:
+        if inicio is not None and (y is None or y - fim > 3):
+            if fim - inicio >= 15 and (melhor is None or fim - inicio > melhor[1] - melhor[0]):
+                melhor = (inicio, fim)
+            inicio = None
+        if y is not None:
+            if inicio is None:
+                inicio = y
+            fim = y
+
+    return None if melhor is None else (melhor[0] + melhor[1]) // 2
+
+
+def numeros_do_dialogo(texto):
+    """Os numeros escritos no texto do dialogo, como inteiros: 853,811 -> 853811."""
+
+    return {int(g.replace('.', '').replace(',', ''))
+            for g in comum._NUMERO_ESCRITO.findall(texto or '')}
+
+
+def confirmar_ordem(plano):
+    """Responde a pergunta do jogo depois do Create Buy Order. (ok, motivo).
+
+    O jogo nem sempre pergunta - com o aviso "YOU CANNOT EQUIP THIS ITEM", sim.
+    Sem pergunta na tela, a ordem ja foi criada.
+
+    SO CLICA EM YES SE O DIALOGO DISSER O QUE O PLANO PEDIU: o preco de cada
+    unidade, e a quantidade ou o total. Qualquer outra coisa e No - o dialogo e
+    o jogo dizendo o que vai fazer, e ele discordar e a ultima chance de parar."""
+
+    x1, y1, _, _ = cd.DIALOGO_ORDEM_COLUNA
+    fim = time.monotonic() + ESPERA_DIALOGO
+    centro = None
+
+    while time.monotonic() < fim:
+        comum.checar_aborto()
+        centro = _botoes_do_dialogo(comum.capturar(cd.DIALOGO_ORDEM_COLUNA))
+        if centro is not None:
+            break
+        time.sleep(0.10)
+
+    if centro is None:
+        return True, ''
+
+    y = y1 + centro
+
+    comum.esperar_estavel(cd.DIALOGO_ORDEM_TEXTO, ESPERA_DIALOGO,
+                          intervalo=comum.SONDAGEM_LENTA)
+    texto = comum.ler_texto(cd.DIALOGO_ORDEM_TEXTO)
+    numeros = numeros_do_dialogo(texto)
+
+    total = total_da_ordem(plano['preco'], plano['unidades'])
+
+    if int(plano['preco']) in numeros and (int(plano['unidades']) in numeros
+                                           or total in numeros):
+        comum.clicar({'x': cd.DIALOGO_ORDEM_SIM_X, 'y': y})
+        comum.contar('ordens_confirmadas')
+        return True, ''
+
+    comum.clicar({'x': cd.DIALOGO_ORDEM_NAO_X, 'y': y})
+    comum.contar('ordens_recusadas_no_dialogo')
+    _guardar_falha('dialogo_ordem', [f'texto            : {texto!r}',
+                                     f'previsto         : {plano["unidades"]} x {plano["preco"]} = {total}'],
+                   regiao=cd.DIALOGO_ORDEM_TEXTO)
+
+    return False, (f'o dialogo do jogo nao confirma {plano["unidades"]} x '
+                   f'{comum.fmt(plano["preco"])} - respondido No')
+
+
 def criar_ordem(plano, tolerancia=0.01):
     """Cria o pedido de compra do <plano>. Devolve (ok, motivo).
 
@@ -354,37 +828,49 @@ def criar_ordem(plano, tolerancia=0.01):
 
     E a mesma licao que custou caro no bot antigo, onde o dialogo de confirmacao
     dizia um valor e a lista dizia outro. So que la a divergencia custava uma
-    unidade; aqui custaria a ordem inteira."""
+    unidade; aqui custaria a ordem inteira.
+
+    E E O TOTAL QUE CONFERE A QUANTIDADE. Ela vai na bolha em cima da barra
+    (o "1"), e a bolha anda com a barra: depois de digitar nao ha um lugar fixo
+    para le-la de volta. Por isso, Total ilegivel agora impede a ordem - antes
+    deixava passar, quando a quantidade era conferida no proprio campo."""
 
     comum.secao_critica.set()
 
     try:
         comum.clicar(cd.PAINEL_PEDIDO_DE_COMPRA)
 
-        if not preencher(cd.PAINEL_QTD_BARRA, cd.PAINEL_QTD_VALOR,
-                         plano['unidades']):
-            return False, 'a quantidade nao entrou no campo'
+        comum.clicar(cd.PAINEL_QTD_NUMERO)
+        comum.limpar_campo()
+        comum.digitar(str(int(plano['unidades'])))
 
-        if not preencher(cd.PAINEL_PRECO_CAMPO, cd.PAINEL_PRECO_VALOR,
-                         plano['preco']):
+        # o campo de preco e o mesmo do painel de venda do Mercado Negro
+        if not preencher_conferindo(cd.PAINEL_PRECO_CAMPO, cd.VND_PRECO_VALOR,
+                                    plano['preco']):
+            _guardar_falha('preco', [f'digitado          : {plano["preco"]}'],
+                           regiao=cd.VND_PRECO_VALOR)
             return False, 'o preco nao entrou no campo'
 
-        comum.esperar_estavel(cd.PAINEL_TOTAL, ESPERA_CAMPO,
-                              intervalo=comum.SONDAGEM_LENTA)
+        previsto = total_da_ordem(plano['preco'], plano['unidades'])
+        ok, lidos = conferir_total(previsto, tolerancia)
 
-        total = comum.ler_numero(cd.PAINEL_TOTAL)
-
-        if total is None:
-            comum.contar('total_ilegivel')
-        else:
-            previsto = plano['custo_maximo']
-
-            if abs(total - previsto) > max(1, previsto * tolerancia):
-                comum.contar('total_divergente')
-                return False, (f'a tela reserva {comum.fmt(total)} e o plano '
-                               f'previa {comum.fmt(previsto)}')
+        if not ok:
+            comum.contar('total_divergente')
+            _guardar_falha('total', [f'previsto          : {previsto}'],
+                           regiao=cd.PAINEL_TOTAL_VALOR)
+            lido = next((v for v in lidos if v is not None), None)
+            return False, (f'a tela reserva '
+                           f'{comum.fmt(lido) if lido else "um Total ilegivel"} '
+                           f'e o plano previa {comum.fmt(previsto)} - a quantidade '
+                           f'ou o preco nao entrou')
 
         comum.clicar(cd.PAINEL_CRIAR)
+
+        # o jogo pode perguntar antes de criar - e a ordem so existe com o Yes
+        ok, motivo = confirmar_ordem(plano)
+
+        if not ok:
+            return False, motivo
 
     finally:
         comum.secao_critica.clear()
@@ -538,13 +1024,42 @@ def comprar_uma(esperado, aceitar=None):
     return 'comprou', (cobrado if cobrado is not None else esperado), motivo
 
 
-def _guardar_falha(nome, extras):
+# O painel do item e o livro ao lado, para o print de diagnostico.
+TELA_DO_PAINEL = (420, 280, 1510, 790)
+
+# Prints do painel por operacao - o bastante para entender, sem encher a pasta.
+MAXIMO_DE_PRINTS_DO_PAINEL = 3
+
+
+def guardar_tela_do_painel(nome):
+    """Salva o painel inteiro como esta agora. Devolve o caminho, ou None.
+
+    Nao e o salvar_diagnostico: aquele guarda o ultimo recorte do OCR, e aqui o
+    que importa e a tela toda - onde o painel abriu e o que o livro mostra."""
+
+    if not SALVAR_FALHAS or comum.contador('prints_do_painel') >= MAXIMO_DE_PRINTS_DO_PAINEL:
+        return None
+
+    comum.contar('prints_do_painel')
+
+    try:
+        seguro = ''.join(c if c.isalnum() or c in ' -_.' else '_' for c in nome).strip()
+        caminho = os.path.join(comum.pasta_registro(PASTA_FALHAS),
+                               f'{time.strftime("%H%M%S")}_painel_{seguro}.png')
+        comum.capturar(TELA_DO_PAINEL).save(caminho)
+        return caminho
+
+    except Exception:
+        return None
+
+
+def _guardar_falha(nome, extras, regiao=None):
 
     if not SALVAR_FALHAS:
         return
 
     comum.salvar_diagnostico(PASTA_FALHAS,
                              time.strftime('%H%M%S') + '_' + nome,
-                             regiao=cd.CMP_DIALOGO_COMPRA, extras=extras)
+                             regiao=regiao or cd.CMP_DIALOGO_COMPRA, extras=extras)
 
 #endregion

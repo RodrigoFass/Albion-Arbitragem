@@ -82,7 +82,8 @@ PADRAO = {
     'avisos': True,
 
     # --- como a varredura se comporta -------------------------------------
-    # Apagar os precos daquele mercado antes de varrer.
+    # Apagar antes de varrer os precos DOS ITENS QUE VAO SER LIDOS naquele
+    # mercado - os outros grupos do catalogo ficam.
     #
     # Sem isso, parar no meio deixa o mercado com precos novos em alguns itens e
     # antigos nos demais, sem como distinguir - e a calculadora trata os dois
@@ -111,6 +112,12 @@ PADRAO = {
     # texto embaixo. Lembrar transforma a tela em "confirme onde voce esta".
     'ultimo_mercado': '',
 
+    # O CATALOGO EM USO, para abrir o mesmo da proxima vez. Sem isto o programa
+    # reabria sempre no "padrao": a lista de compra de Lymhurst, montada com o
+    # NO RELIC, caiu de 77 linhas para 38 depois de uma atualizacao - os mesmos
+    # precos, contados com outro catalogo.
+    'catalogo': 'padrao',
+
     # AS COMBINACOES QUE A LEITURA DE PRECOS PERCORRE. None = todas as que o
     # catalogo tem; uma lista ('T5.2', 'T6.0', ...) deixa so essas. E um filtro
     # da LEITURA, marcado na propria tela de Ler precos: pular de uma vez o que
@@ -120,11 +127,13 @@ PADRAO = {
     # --- como o bot compra ------------------------------------------------
     # SMART BUY, SO ORDEM, OU SO NA HORA.
     #
-    # O automatico escolhe por linha e acerta quase sempre. As duas travas
-    # existem para quando voce sabe algo que a regra nao sabe: numa rodada de
-    # itens caros, ordem nenhuma; num item que voce quer varrer inteiro, ordem
-    # sempre.
-    'modo_de_compra': 'smart',
+    # O PADRAO E SEMPRE ORDEM: um pedido de compra com a quantidade e o preco
+    # que cobre a faixa de ofertas casa com todas elas na hora, num clique. O
+    # automatico mandava item acima de 100.000 para a compra na hora - uma
+    # unidade por vez, tres cliques cada -, e na pratica a compra levava uma so.
+    # As outras duas opcoes ficam para quem quiser: numa rodada de itens caros,
+    # ordem nenhuma.
+    'modo_de_compra': 'ordem',
 
     # As duas regras do Smart Buy, com os numeros da tela de referencia.
     #

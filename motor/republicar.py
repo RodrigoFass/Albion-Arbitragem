@@ -29,8 +29,6 @@
 
 import time
 
-from PIL import Image, ImageOps
-
 from motor import categorias
 from motor import comum
 from motor import compra
@@ -48,17 +46,6 @@ from motor.comum import relatar
 # Limites, em segundos.
 ESPERA_PAINEL = 2.50
 ESPERA_CRIAR = 2.50
-
-# Leituras do campo de preco antes de redigitar, e o intervalo entre elas -
-# meio piscar do cursor de texto.
-LEITURAS_DO_CAMPO = 4
-ESPERA_ENTRE_LEITURAS = 0.15
-
-# A leitura do campo de preco em edicao. O fundo bege fica em ~184 de cinza e o
-# traco em ~46; nos prints do jogo 130 e 150 acertaram todos, 110 quase todos.
-LIMIARES_DO_CAMPO = (130, 150, 110)
-ESCALA_DO_CAMPO = 4
-CONFIG_DO_CAMPO = '--psm 7 --oem 1 -c tessedit_char_whitelist=0123456789'
 
 # A imagem e o OCR do campo de preco que nao conferiu, em dados/registros.
 PASTA_FALHAS = 'falhas_venda_mochila'
@@ -177,69 +164,41 @@ def unidades_do_total(total, preco):
     return unidades, taxa
 
 
-def ler_campo_da_imagem(bruta):
-    """Os numeros que uma captura do campo de preco pode estar mostrando.
+def quantidade_pelo_total(preco):
+    """(unidades, taxa) lendo o Total do painel, ou (None, None).
 
-    O CAMPO EM EDICAO NAO E A LISTA. O numero e marrom sobre um bege em
-    degrade, com o cursor de texto branco piscando colado no ultimo digito, e o
-    preparo do ler_numero - feito para a lista - lia "83384" como "8338400" ou
-    perdia o "1" de "126981" (dados/registros/falhas_venda_mochila). Aqui o
-    traco escuro vira preto e todo o resto, cursor incluso, vira fundo.
+    PELA LEITURA DO PAINEL (compra.ler_campo), e nao pelo ler_numero: com a
+    moeda no recorte ele voltava vazio, e a ordem ia para o historico como
+    "quantidade nao lida" - fora da soma do que esta a venda. Das leituras, vale
+    a que der um numero INTEIRO de unidades: o Total e preco x unidades menos a
+    taxa de venda, e uma leitura errada nao cai redonda por acaso."""
 
-    Devolve uma leitura por limiar: quem chama confere se ALGUMA bate com o que
-    foi digitado. Um limiar errar para o numero exato que se digitou nao
-    acontece por acaso."""
+    comum.esperar_estavel(cd.PAINEL_TOTAL_VALOR, ESPERA_PAINEL,
+                          intervalo=comum.SONDAGEM_LENTA)
 
-    cinza = bruta.convert('L')
-    lidos = []
+    for _ in range(compra.LEITURAS_DO_CAMPO):
 
-    for limiar in LIMIARES_DO_CAMPO:
-        preto = cinza.point(lambda v, limiar=limiar: 0 if v < limiar else 255)
-        grande = preto.resize((preto.width * ESCALA_DO_CAMPO,
-                               preto.height * ESCALA_DO_CAMPO), Image.LANCZOS)
-        texto, _ = comum._reconhecer_com_confianca(
-            ImageOps.expand(grande, border=20, fill=255), CONFIG_DO_CAMPO)
-        lidos.append(comum.numero_valido(texto))
+        for total in compra.ler_campo(cd.PAINEL_TOTAL_VALOR):
+            unidades, taxa = unidades_do_total(total, preco)
 
-    return lidos
+            if unidades and abs(total - preco * unidades * (1 - taxa)) <= max(2, total * 0.001):
+                return unidades, taxa
 
+        time.sleep(compra.ESPERA_ENTRE_LEITURAS)
 
-def ler_campo_preco():
-    """ler_campo_da_imagem() do campo de preco na tela, guardado para diagnostico."""
+    comum.contar('quantidade_nao_lida')
 
-    bruta = comum.capturar(cd.VND_PRECO_VALOR)
-    lidos = ler_campo_da_imagem(bruta)
-
-    comum._ultima_imagem = bruta
-    comum._ultimo_texto = ' / '.join(str(v) for v in lidos)
-
-    return lidos
+    return None, None
 
 
 def preencher_preco(preco):
-    """Digita o preco e CONFERE lendo de volta. True se ficou la.
+    """Digita o preco no campo do painel e CONFERE lendo de volta.
 
-    Como o compra.preencher, mas lendo VARIAS VEZES antes de digitar de novo:
-    o cursor de texto pisca dentro do numero, e um quadro com ele aceso pode
-    sair com um digito a mais. Redigitar por causa disso so trocava um quadro
-    ruim por outro."""
+    A leitura do campo em edicao e a mesma da compra - ver
+    compra.preencher_conferindo."""
 
-    for _ in range(compra.TENTATIVAS_DE_CAMPO):
-
-        comum.checar_aborto()
-
-        comum.clicar(cd.PAINEL_PRECO_CAMPO)
-        comum.limpar_campo()
-        comum.digitar(str(int(preco)))
-
-        for _ in range(LEITURAS_DO_CAMPO):
-            if int(preco) in ler_campo_preco():
-                return True
-            time.sleep(ESPERA_ENTRE_LEITURAS)
-
-        comum.contar('campos_refeitos')
-
-    return False
+    return compra.preencher_conferindo(cd.PAINEL_PRECO_CAMPO, cd.VND_PRECO_VALOR,
+                                       preco)
 
 
 def listar_aberto(item, de_verdade=True):
@@ -280,9 +239,7 @@ def listar_aberto(item, de_verdade=True):
                                      extras=[f'digitado          : {preco}'])
             return saida
 
-        comum.esperar_estavel(cd.PAINEL_TOTAL, ESPERA_PAINEL,
-                              intervalo=comum.SONDAGEM_LENTA)
-        total = comum.ler_numero(cd.PAINEL_TOTAL)
+        unidades, taxa = quantidade_pelo_total(preco)
 
         comum.clicar(cd.PAINEL_CRIAR)
 
@@ -291,11 +248,13 @@ def listar_aberto(item, de_verdade=True):
 
     time.sleep(ESPERA_CRIAR / 5)
 
-    unidades, taxa = unidades_do_total(total, preco)
-    saida.update(ok=True, unidades=unidades)
-
+    # O QUE ESTA ORDEM RENDE: o bruto menos a taxa de venda (4% com Premium, 8%
+    # sem - o Total do painel diz qual) e os 2,5% de criar a ordem
     liquido = (int(preco * unidades * (1 - taxa - lucro.TAXA_DE_ORDEM))
                if unidades else None)
+
+    saida.update(ok=True, unidades=unidades, taxa=taxa,
+                 bruto=preco * unidades if unidades else None, liquido=liquido)
 
     historico.vendeu(mercado.MERCADO_NEGRO, item, '', unidades or 1, preco,
                      modo=historico.ORDEM,
@@ -369,6 +328,11 @@ def item_da_linha(texto):
     # "a | Grandmaster's Spiked Gauntlets" - o grau e procurado em qualquer lugar
     lido = comum.normalizar(texto)
 
+    # o T8 com nome proprio: "Vendetta's Wrath" e o Great Fire Staff
+    for (base, _), proprio in nomes.NOME_PROPRIO.items():
+        if comum.normalizar(proprio) in lido:
+            return base
+
     for prefixo in nomes.PREFIXO_INGLES.values():
         p = comum.normalizar(prefixo) + ' '
         if p in lido:
@@ -407,6 +371,10 @@ def vender(de_verdade=True):
     ordens = 0
     puladas = 0
     linha = 0
+
+    # O QUE FICOU A VENDA NESTA PASSADA: soma das ordens criadas, e quantas
+    # ficaram fora da soma por nao ter a quantidade lida
+    venda = {'unidades': 0, 'bruto': 0, 'liquido': 0, 'sem_quantidade': 0}
 
     relatar('')
     relatar('Vendendo a mochila pelo mercado: cada linha da lista, 1 prata '
@@ -462,7 +430,15 @@ def vender(de_verdade=True):
             ordens += 1
             quantas = f'{r["unidades"]}x ' if r['unidades'] else ''
             relatar(f'{item}: {quantas}ordem a {comum.fmt(r["preco"])}'
+                    + (f' = {comum.fmt(r["liquido"])} liquido' if r.get('liquido') else '')
                     + (' (simulacao)' if not de_verdade else ''))
+
+            if r.get('liquido'):
+                venda['unidades'] += r['unidades']
+                venda['bruto'] += r['bruto']
+                venda['liquido'] += r['liquido']
+            elif de_verdade:
+                venda['sem_quantidade'] += 1
 
             # de verdade, a pilha saiu e a de baixo subiu para esta linha;
             # simulando, nada sai - a proxima e a linha de baixo
@@ -474,15 +450,30 @@ def vender(de_verdade=True):
         puladas += 1
         linha += 1
 
-    return _resumo(ordens, puladas, inicio)
+    return _resumo(ordens, puladas, inicio, venda, de_verdade)
 
 
-def _resumo(ordens, puladas, inicio):
+def _resumo(ordens, puladas, inicio, venda=None, de_verdade=True):
 
     minutos = (time.monotonic() - inicio) / 60
+    venda = venda or {'unidades': 0, 'bruto': 0, 'liquido': 0, 'sem_quantidade': 0}
 
     relatar('')
     relatar(f'{ordens} ordens criadas, {puladas} pilhas puladas, em {minutos:.0f} min')
+
+    # O TOTAL A VENDA: o que as ordens desta passada rendem, ja sem a taxa de
+    # venda e os 2,5% da ordem
+    if venda['unidades']:
+        relatar(f'A venda: {venda["unidades"]} unidades, {comum.fmt(venda["bruto"])} bruto, '
+                f'{comum.fmt(venda["liquido"])} liquido (depois das taxas)')
+        comum.avisar('Total à venda', comum.fmt(venda['liquido']))
+
+    if venda['sem_quantidade']:
+        relatar(f'  {venda["sem_quantidade"]} ordens sem a quantidade lida ficaram '
+                'FORA do total')
+
+    if not de_verdade:
+        relatar('  Simulando, o preco nao e digitado - o total so sai na venda de verdade.')
 
     for chave, texto in (
         ('qualidade_nao_foi_para_normal',
@@ -497,6 +488,8 @@ def _resumo(ordens, puladas, inicio):
             relatar(f'  {comum.contador(chave)} {texto}')
 
     return {'ordens': ordens, 'puladas': puladas, 'minutos': minutos,
-            'contadores': comum.contadores()}
+            'unidades': venda['unidades'], 'bruto': venda['bruto'],
+            'liquido': venda['liquido'], 'sem_quantidade': venda['sem_quantidade'],
+            'de_verdade': de_verdade, 'contadores': comum.contadores()}
 
 #endregion

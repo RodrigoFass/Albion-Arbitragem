@@ -385,7 +385,17 @@ def montar(catalogo, origem, destino=None, margem_minima=MARGEM_PADRAO,
     velhos = 0
     abaixo = 0
 
+    # SO CONTA FALTA DE PRECO NO QUE FOI PESQUISADO. Um item que nunca foi lido
+    # naquela cidade nao e falha - e so o que ainda nao se varreu -, e contado
+    # junto ele fazia o aviso dizer "498 sem preco" por causa de dois grupos do
+    # catalogo que nem tinham sido lidos ali. Fica de fora calado.
+    lidos_na_origem = set(mercado.itens(origem))
+    lidos_no_destino = set(mercado.itens(destino))
+
     for item, rot, quantidade in catalogo:
+
+        if item not in lidos_na_origem or item not in lidos_no_destino:
+            continue
 
         l, motivo = _linha_normal(item, rot, origem, destino, quantidade, taxa,
                                   idade_maxima, ordem_na_compra)

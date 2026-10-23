@@ -359,8 +359,8 @@ def mercados_lidos():
     return [m for m in MERCADOS if _banco.get(m)]
 
 
-def quantidade(mercado=None):
-    """Quantos precos existem, no total ou num mercado."""
+def quantidade(mercado=None, itens=None):
+    """Quantos precos existem, no total, num mercado, ou so de <itens> nele."""
 
     carregar()
 
@@ -368,7 +368,8 @@ def quantidade(mercado=None):
 
     return sum(len(c)
                for m in alvos
-               for c in _banco.get(m, {}).values())
+               for i, c in _banco.get(m, {}).items()
+               if itens is None or i in itens)
 
 
 def idade_mais_velha(mercado):
@@ -424,8 +425,13 @@ def apagar_velhos(horas):
 ARQUIVO_ANTERIOR = os.path.join(comum.PASTA_DADOS, 'precos-anterior.json')
 
 
-def apagar_mercado(mercado):
+def apagar_mercado(mercado, itens=None):
     """Zera as leituras de um mercado, GUARDANDO COPIA. Devolve quantas sairam.
+
+    <itens> limita a apagada aos itens que vao ser relidos. SEM ELE, O MERCADO
+    INTEIRO SAI - e era assim que a varredura fazia: ler o grupo Armors no
+    Mercado Negro apagava junto os precos do Mage Cape-Bag lidos uma hora antes,
+    e esses itens sumiam da lista de compra sem nada na tela explicar.
 
     A copia nao e zelo: "apagar antes de varrer" e o padrao, e apagar acontece no
     primeiro segundo da varredura. Parar no item cinco - por F12, por o jogo cair
@@ -438,18 +444,25 @@ def apagar_mercado(mercado):
     carregar()
 
     with _trava:
-        n = quantidade(mercado)
+        lidos = _banco.get(mercado, {})
+        alvo = list(lidos) if itens is None else [i for i in itens if i in lidos]
+        saindo = {i: lidos[i] for i in alvo}
+        n = sum(len(c) for c in saindo.values())
 
         if n:
-            _guardar_copia(mercado)
+            _guardar_copia(mercado, saindo)
 
-        _banco.pop(mercado, None)
+        for i in alvo:
+            lidos.pop(i, None)
+
+        if not lidos:
+            _banco.pop(mercado, None)
 
     return n
 
 
-def _guardar_copia(mercado):
-    """Grava o que vai ser apagado em precos-anterior.json."""
+def _guardar_copia(mercado, saindo):
+    """Grava em precos-anterior.json o que vai ser apagado daquele mercado."""
 
     try:
         anterior = {}
@@ -460,7 +473,7 @@ def _guardar_copia(mercado):
                 if isinstance(lido, dict):
                     anterior = lido
 
-        anterior[mercado] = _banco.get(mercado, {})
+        anterior[mercado] = saindo
 
         # A MESMA ESCRITA ATOMICA DO precos.json: gravar por cima e ser
         # interrompido no meio destruiria a copia justamente na hora em que ela
@@ -479,7 +492,10 @@ def _guardar_copia(mercado):
 
 
 def restaurar_copia(mercado):
-    """Devolve ao banco o que a ultima apagada tirou. Quantos precos voltaram."""
+    """Devolve ao banco o que a ultima apagada tirou. Quantos precos voltaram.
+
+    JUNTA, E NAO SUBSTITUI. A copia tem so os itens apagados; trocar o mercado
+    inteiro por ela jogaria fora o que foi lido depois, nos outros itens."""
 
     try:
         with open(ARQUIVO_ANTERIOR, encoding='utf-8') as f:
@@ -495,9 +511,23 @@ def restaurar_copia(mercado):
 
     carregar()
 
-    _banco[mercado] = guardado
+    voltaram = 0
 
-    return quantidade(mercado)
+    with _trava:
+        lidos = _banco.setdefault(mercado, {})
+
+        # combinacao por combinacao, ficando com a mais recente: o que foi
+        # relido depois da apagada vale mais que a copia
+        for item, combos in guardado.items():
+            atual = lidos.setdefault(item, {})
+
+            for rot, dado in combos.items():
+                if (rot not in atual
+                        or (dado or {}).get('quando', 0) > (atual[rot] or {}).get('quando', 0)):
+                    atual[rot] = dado
+                    voltaram += 1
+
+    return voltaram
 
 
 def tem_copia(mercado):

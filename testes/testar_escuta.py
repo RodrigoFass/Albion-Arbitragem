@@ -142,6 +142,19 @@ checar('nome que difere no menu tambem recebe (Greathammer)',
        escuta.receber({'Orders': [ordem('T5_2H_HAMMER', '0007', 9000)]}) == 1
        and mercado.ler('Thetford', 'Greathammer', 'T5.0')[0] == 9000)
 
+# O ROYAL SIGIL FOGE DO PADRAO T4_...: o grau vem no fim do identificador. Sem
+# isto, o Sigil aberto no mercado nao virava preco, e o craft Royal nao fechava
+checar('o identificador do Royal Sigil e reconhecido',
+       escuta.decompor('QUESTITEM_TOKEN_ROYAL_T6') == ('QUESTITEM_TOKEN_ROYAL', 6, 0),
+       str(escuta.decompor('QUESTITEM_TOKEN_ROYAL_T6')))
+
+escuta.receber({'Orders': [ordem('QUESTITEM_TOKEN_ROYAL_T6', '1002', 2100, 40),
+                           ordem('QUESTITEM_TOKEN_ROYAL_T6', '1002', 2050, 12)]})
+
+checar('e o Sigil aberto no mercado vira preco na cidade, no grau dele',
+       mercado.ler('Lymhurst', 'Royal Sigil', 'T6.0')[0] == 2050,
+       str(mercado.ler('Lymhurst', 'Royal Sigil', 'T6.0')))
+
 
 # ============================================================
 grupo('quem le espera o pacote certo')

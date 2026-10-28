@@ -7,6 +7,7 @@
 const ORDEM = [
   ['operacao', 'Operação', 'operacao'],
   ['itens', 'Itens', 'itens'],
+  ['royal', 'Craft Royal', 'coroa'],
   ['historico', 'Histórico', 'historico'],
   ['ajustes', 'Ajustes', 'ajustes'],
 ];

@@ -5423,6 +5423,64 @@ checar('lista vazia: nenhuma ordem', _r['ordens'] == 0 and _clicadas == [0], str
 
 
 # ============================================================
+grupo('o craft Royal')
+
+# A RECEITA, DOS DADOS DO JOGO: o item normal do mesmo slot (um dos tres da
+# linha) mais Royal Sigils do mesmo grau. Vender na hora no Buy Order do BM.
+from motor import royal   # noqa: E402
+
+checar('as receitas: peito pede o dobro de Sigils da cabeca e do pe',
+       royal.sigils('Royal Robe', 4) == 4 and royal.sigils('Royal Robe', 6) == 16
+       and royal.sigils('Royal Hood', 4) == 2 and royal.sigils('Royal Boots', 8) == 8
+       and royal.sigils('Royal Armor', 5) == 8)
+
+checar('e os 27 itens normais das receitas, sem repetir',
+       len(royal.itens_normais()) == 27 and 'Mage Robe' in royal.itens_normais()
+       and 'Knight Helmet' in royal.itens_normais())
+
+checar('as combinacoes: T4 a T8, .0 a .4, ou so as marcadas para ler',
+       len(royal.combinacoes()) == 25 and royal.combinacoes(['T6.0', 'T8.1', 'T5.9']) == [(6, 0), (8, 1)])
+
+_banco_royal = mercado._banco
+mercado.usar_banco({})
+_agora = time.time()
+
+# Royal Robe T6.0: Buy Order 400.000 no Mercado Negro; na cidade, o Mage Robe e
+# o mais barato dos tres; 16 Sigils T6 a 2.000
+mercado.gravar(mercado.MERCADO_NEGRO, 'Royal Robe', 'T6.0', 450_000, _agora, outro=400_000)
+mercado.gravar('Lymhurst', 'Scholar Robe', 'T6.0', 60_000, _agora)
+mercado.gravar('Lymhurst', 'Cleric Robe', 'T6.0', 55_000, _agora)
+mercado.gravar('Lymhurst', 'Mage Robe', 'T6.0', 50_000, _agora)
+mercado.gravar('Lymhurst', royal.SIGIL, 'T6.0', 2_000, _agora)
+
+# Royal Cowl T6.0: tem Buy Order, mas nenhum Cowl normal na cidade
+mercado.gravar(mercado.MERCADO_NEGRO, 'Royal Cowl', 'T6.0', 200_000, _agora, outro=150_000)
+
+# Royal Hood T7.0: tem Buy Order e item normal, mas nao ha preco de Sigil T7
+mercado.gravar(mercado.MERCADO_NEGRO, 'Royal Hood', 'T7.0', 300_000, _agora, outro=250_000)
+mercado.gravar('Lymhurst', 'Hunter Hood', 'T7.0', 70_000, _agora)
+
+try:
+    _linhas, _faltas = royal.calcular('Lymhurst', lucro.TAXA_COM_PREMIUM)
+finally:
+    mercado.usar_banco(_banco_royal)
+
+_robe = [l for l in _linhas if l['royal'] == 'Royal Robe' and l['combinacao'] == 'T6.0']
+
+checar('a conta: Buy Order menos a taxa, contra o item normal mais barato e os Sigils',
+       len(_robe) == 1 and _robe[0]['normal'] == 'Mage Robe'
+       and _robe[0]['custo'] == 50_000 + 16 * 2_000
+       and _robe[0]['receita'] == int(400_000 * (1 - lucro.TAXA_COM_PREMIUM))
+       and _robe[0]['lucro'] == int(400_000 * 0.96) - 82_000, str(_robe))
+
+checar('vender na hora e pelo Buy Order (o pedido), e nao pela oferta de venda',
+       _robe and _robe[0]['buy_order'] == 400_000, str(_robe))
+
+checar('o que nao fecha a conta fica de fora, contado pelo motivo',
+       len(_linhas) == 1 and _faltas['sem_item_normal'] >= 1 and _faltas['sem_sigil'] >= 1
+       and _faltas['sem_buy_order'] == 9 * 25 - 3, str(_faltas))
+
+# ============================================================
 grupo('os avisos do canto de baixo')
 
 # O log so vai ser lido depois - a janela passa a varredura inteira minimizada.

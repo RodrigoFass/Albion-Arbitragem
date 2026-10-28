@@ -126,6 +126,7 @@ def rodar():
         grupo('cada tela abre e desenha')
 
         for chave, titulo in (('operacao', 'Operação'), ('itens', 'Itens'),
+                              ('royal', 'Craft Royal'),
                               ('historico', 'Histórico'), ('ajustes', 'Ajustes')):
             js(f"app.ir('{chave}')", 1.5)
             checar(f'{titulo}: o titulo', js("document.getElementById('titulo').textContent") == titulo)
@@ -181,6 +182,22 @@ def rodar():
         checar('a grade de quantidades', visivel('.quantidades .entrada') == 13,
                str(visivel('.quantidades .entrada')))
         checar('o catalogo listado', visivel('.lista-arvore') == 2)
+
+        # ---------------------------------------------------------------------
+        grupo('Craft Royal')
+
+        js("app.ir('royal')", 1.5)
+        checar('os cinco campos de preco do Sigil', visivel('[data-tela=royal] .com-unidade') == 5,
+               str(visivel('[data-tela=royal] .com-unidade')))
+        checar('os dois botoes de leitura',
+               visivel('[data-tela=royal] .botao') >= 2)
+
+        # o Sigil digitado entra na conta e volta para o campo
+        js("(() => { const i = document.querySelectorAll('[data-tela=royal] .com-unidade input')[2];"
+           " i.value = '2150'; i.dispatchEvent(new Event('change')); })()", 1.5)
+        checar('o Sigil T6 digitado fica guardado',
+               any(s['grau'] == 6 and s['preco'] == 2150
+                   for s in api.royal_estado(api.royal_estado()['cidade'])['sigils']))
 
         # ---------------------------------------------------------------------
         grupo('Historico')

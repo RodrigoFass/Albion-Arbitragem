@@ -41,6 +41,7 @@ from motor import lucro
 from motor import mercado
 from motor import mercado_negro
 from motor import republicar
+from motor import royal
 from motor import vendedor
 
 TITULO = 'Albion Arbitragem'
@@ -462,6 +463,94 @@ class Api:
             extras.append(f'a rede diz que você está em {pela_rede}, e não em {local}')
 
         return self._rodar(trabalho, f'Lendo preços em {local}', forcar, extras)
+
+    # ======================================================================
+    # CRAFT ROYAL
+    # ======================================================================
+
+    def royal_estado(self, cidade=None):
+        """A conta do craft Royal numa cidade, e os precos de Sigil que ela usa."""
+
+        conf = ajustes.atuais()
+        cidades = list(mercado.ORIGENS)
+
+        if cidade not in cidades:
+            ultimo = conf.get('ultimo_mercado')
+            cidade = ultimo if ultimo in cidades else cidades[0]
+
+        linhas, faltas = royal.calcular(cidade, conf['taxa'],
+                                        conf.get('combinacoes_lidas'),
+                                        conf['idade_maxima'])
+
+        sigils = []
+        for grau in royal.GRAUS:
+            preco, idade = mercado.ler(cidade, royal.SIGIL, mercado.rotulo(grau, 0))
+            sigils.append({'grau': grau, 'preco': preco,
+                           'idade': None if idade is None else round(idade, 1)})
+
+        return {'cidade': cidade, 'cidades': cidades, 'linhas': linhas,
+                'faltas': faltas, 'sigils': sigils, 'taxa': conf['taxa'],
+                'royais': len(royal.ROYAIS), 'normais': len(royal.itens_normais()),
+                'combinacoes': len(royal.combinacoes(conf.get('combinacoes_lidas')))}
+
+    def definir_sigil(self, cidade, grau, preco):
+        """Guarda o preco de um Royal Sigil digitado na tela."""
+
+        valor = _numero(preco, inteiro=True)
+
+        if cidade not in mercado.ORIGENS or int(grau) not in royal.GRAUS:
+            return {'erro': 'Cidade ou grau desconhecido.'}
+
+        if not valor or valor <= 0:
+            return {'erro': 'Digite o preço de um Sigil, em prata.'}
+
+        mercado.gravar(cidade, royal.SIGIL, mercado.rotulo(int(grau), 0), valor)
+        mercado.salvar()
+
+        return self.royal_estado(cidade)
+
+    def _ler_para_o_royal(self, local, itens, rotulo, forcar):
+        """A mesma leitura de precos da Operacao, com a lista de itens do Royal."""
+
+        conf = ajustes.atuais()
+        no_negro = local == mercado.MERCADO_NEGRO
+        combinacoes = royal.combinacoes(conf.get('combinacoes_lidas'))
+
+        if not combinacoes:
+            return {'ok': False, 'motivo': 'Nenhuma combinação marcada para ler — '
+                                           'marque alguma em "Combinações", na Operação.'}
+
+        def trabalho():
+            if no_negro:
+                mercado_negro.esquecer_calibragem()
+            conferidor.varrer(local, itens, combinacoes=combinacoes,
+                              apagar_antes=conf['apagar_antes'],
+                              repescar_depois=conf['repescar'],
+                              amostras=conf['amostras'],
+                              tela=mercado_negro.TELA if no_negro else None)
+
+        extras = []
+        pela_rede = escuta.local_atual()
+
+        if pela_rede and pela_rede != local:
+            extras.append(f'a rede diz que você está em {pela_rede}, e não em {local}')
+
+        return self._rodar(trabalho, rotulo, forcar, extras)
+
+    def ler_royal_negro(self, forcar=False):
+        """Le os 9 itens Royal no Mercado Negro - o Buy Order e a venda na hora."""
+
+        return self._ler_para_o_royal(mercado.MERCADO_NEGRO, list(royal.ROYAIS),
+                                      'Lendo os Royal no Mercado Negro', forcar)
+
+    def ler_royal_cidade(self, cidade, forcar=False):
+        """Le na cidade os 27 itens normais que viram Royal."""
+
+        if cidade not in mercado.ORIGENS:
+            return {'ok': False, 'motivo': 'Escolha a cidade onde você está.'}
+
+        return self._ler_para_o_royal(cidade, royal.itens_normais(),
+                                      f'Lendo os itens normais em {cidade}', forcar)
 
     def restaurar_precos(self, local):
         """Devolve os precos que a ultima apagada tirou daquele mercado."""

@@ -44,6 +44,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from motor import comum
 from motor import mercado
 from motor import identificadores
+from motor import royal
 
 PORTA_PADRAO = 8642
 ESCALA_DO_PRECO = 10_000
@@ -93,6 +94,11 @@ NOME_DO_CLIENTE = 'albiondata-client.exe'
 
 ID_DO_ITEM = re.compile(r'^T(\d)_([A-Z0-9_]+?)(?:@(\d))?$')
 
+# O ROYAL SIGIL FOGE DO PADRAO: o grau vem no fim, "QUESTITEM_TOKEN_ROYAL_T4", e
+# nao no comeco. Sem esta segunda forma, a rede descartava o Sigil que voce abre
+# no mercado, e a conta do craft Royal ficava sem preco dele.
+ID_DO_SIGIL = re.compile(r'^(QUESTITEM_TOKEN_ROYAL)_T(\d)$')
+
 #region O que chegou
 
 _trava = threading.RLock()
@@ -129,12 +135,20 @@ def _nomes_por_tronco():
         _nomes = {}
         for nome, tronco in identificadores.ids().items():
             _nomes.setdefault(tronco, []).append(nome)
+        _nomes.setdefault(royal.TRONCO_DO_SIGIL, []).append(royal.SIGIL)
 
     return _nomes
 
 
 def decompor(item_id, ench=None):
-    """'T5_MAIN_SWORD@2' -> ('MAIN_SWORD', 5, 2). None se nao for equipamento."""
+    """'T5_MAIN_SWORD@2' -> ('MAIN_SWORD', 5, 2). None se nao for equipamento.
+
+    'QUESTITEM_TOKEN_ROYAL_T4' -> ('QUESTITEM_TOKEN_ROYAL', 4, 0): o Royal Sigil."""
+
+    sigil = ID_DO_SIGIL.match(item_id or '')
+
+    if sigil:
+        return sigil.group(1), int(sigil.group(2)), 0
 
     achado = ID_DO_ITEM.match(item_id or '')
 

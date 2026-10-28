@@ -290,6 +290,42 @@ checar('sem venda pela mochila, nao ha total para mostrar', api.ultima_venda_moc
 
 
 # ============================================================
+grupo('o craft Royal')
+
+r = api.royal_estado('Lymhurst')
+checar('a tela do Royal: cidade, Sigils dos cinco graus e a conta',
+       r['cidade'] == 'Lymhurst' and [s['grau'] for s in r['sigils']] == [4, 5, 6, 7, 8]
+       and isinstance(r['linhas'], list) and vira_json(r), str({k: r[k] for k in ('cidade', 'faltas')}))
+
+checar('cidade desconhecida cai numa que existe', api.royal_estado('Narnia')['cidade'] in r['cidades'])
+
+r = api.definir_sigil('Lymhurst', 6, '2.150')
+checar('o preco do Sigil digitado fica guardado na cidade, no grau dele',
+       [s['preco'] for s in r['sigils'] if s['grau'] == 6] == [2150]
+       and mercado.ler('Lymhurst', 'Royal Sigil', 'T6.0')[0] == 2150, str(r.get('sigils')))
+
+checar('preco de Sigil que nao e numero e recusado',
+       'erro' in api.definir_sigil('Lymhurst', 6, 'abc'))
+
+_verificar_real, _focar_real = comum.verificar_ambiente, comum.focar_jogo
+comum.verificar_ambiente = lambda exigir_foco: ['jogo fechado (teste)']
+comum.focar_jogo = lambda: False
+
+try:
+    rn = api.ler_royal_negro()
+    rc = api.ler_royal_cidade('Lymhurst')
+    rx = api.ler_royal_cidade('Narnia')
+finally:
+    comum.verificar_ambiente, comum.focar_jogo = _verificar_real, _focar_real
+
+checar('as leituras do Royal passam pelo portao do jogo pronto',
+       rn.get('problemas') == ['jogo fechado (teste)'] and rc.get('problemas') == ['jogo fechado (teste)']
+       and api._rodando is None, f'{rn} {rc}')
+
+checar('e ler numa cidade desconhecida nem chega ao jogo', rx.get('ok') is False and rx.get('motivo'), str(rx))
+
+
+# ============================================================
 grupo('o historico')
 
 historico.vendeu(mercado.MERCADO_NEGRO, 'Broadsword', '', 1, 19000, modo='na hora')

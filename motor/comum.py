@@ -49,7 +49,7 @@ from pynput.keyboard import Controller, Key, Listener
 # Sobe a cada mudanca que altere comportamento. Vai para o cabecalho de cada
 # sessao de log e para o rodape da janela: sem isso, todo suporte a alguem que
 # recebeu o pacote comeca por adivinhar qual build a pessoa tem.
-VERSAO = '2.0.0'
+VERSAO = '3.0.0'
 
 
 def _pasta_do_programa():
